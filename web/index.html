@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Remote Mouse</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="status-bar">
+    <div id="connection-status">
+      <div id="status-indicator" class="status-red"></div>
+      <span id="status-text">Connecting...</span>
+    </div>
+    <button id="info-btn" class="info-btn">ℹ</button>
+  </div>
+  
+  <div class="toolbar">
+    <a class="link" href="/apps.html">Controls →</a>
+  </div>
+  
+  <canvas id="pad"></canvas>
+  
+  <!-- Info Modal -->
+  <div id="info-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>How to Use</h3>
+        <button id="close-modal" class="close-btn">×</button>
+      </div>
+      <div class="modal-body">
+        <h4>Trackpad Mode</h4>
+        <ul>
+          <li><strong>One-finger move:</strong> Moves the cursor</li>
+          <li><strong>One-finger tap:</strong> Left click</li>
+          <li><strong>Two-finger move:</strong> Scroll</li>
+        </ul>
+        
+        <h4>Connection Status</h4>
+        <ul>
+          <li><span class="status-dot status-green"></span> <strong>Green:</strong> Connected and ready</li>
+          <li><span class="status-dot status-yellow"></span> <strong>Yellow:</strong> Connecting or reconnecting</li>
+          <li><span class="status-dot status-red"></span> <strong>Red:</strong> Disconnected</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  
+  <script src="/script.js"></script>
+</body>
+</html>

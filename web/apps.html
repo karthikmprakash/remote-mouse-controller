@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Remote Controls</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="status-bar">
+    <div id="connection-status">
+      <div id="status-indicator" class="status-red"></div>
+      <span id="status-text">Connecting...</span>
+    </div>
+    <button id="info-btn" class="info-btn">ℹ</button>
+  </div>
+
+  <div class="toolbar">
+    <a class="link" href="/index.html">← Trackpad</a>
+  </div>
+
+  <main class="page">
+    <section>
+      <h2>Open Apps</h2>
+      <div class="grid">
+        <button class="tile" data-type="launch" data-app="Visual Studio Code">VS Code</button>
+        <button class="tile" data-type="launch" data-app="Xcode">Xcode</button>
+        <button class="tile" data-type="launch" data-app="Simulator">Simulator</button>
+        <button class="tile" data-type="launch" data-app="iTerm">iTerm</button>
+        <button class="tile" data-type="launch" data-app="Terminal">Terminal</button>
+        <button class="tile" data-type="launch" data-app="Safari">Safari</button>
+        <button class="tile" data-type="launch" data-app="Google Chrome">Chrome</button>
+        <button class="tile" data-type="launch" data-app="Finder">Finder</button>
+        <button class="tile" data-type="launch" data-app="Slack">Slack</button>
+        <button class="tile" data-type="launch" data-app="Notes">Notes</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Developer Controls</h2>
+      <div class="grid">
+        <button class="tile" data-type="control" data-action="volume_up">Volume +</button>
+        <button class="tile" data-type="control" data-action="volume_down">Volume −</button>
+        <button class="tile" data-type="control" data-action="mute_toggle">Mute ⏯</button>
+
+        <button class="tile" data-type="control" data-action="play_pause">Music ⏯</button>
+        <button class="tile" data-type="control" data-action="next_track">Next ⏭</button>
+        <button class="tile" data-type="control" data-action="prev_track">Prev ⏮</button>
+
+        <button class="tile" data-type="control" data-action="sleep_display">Sleep Display</button>
+        <button class="tile" data-type="control" data-action="lock">Lock Screen</button>
+        <button class="tile" data-type="open_url" data-url="http://localhost:3000">Open localhost:3000</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Info Modal -->
+  <div id="info-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Controls Help</h3>
+        <button id="close-modal" class="close-btn">×</button>
+      </div>
+      <div class="modal-body">
+        <h4>App Controls</h4>
+        <ul>
+          <li><strong>App Buttons:</strong> Click to launch applications on your Mac</li>
+          <li><strong>Volume Controls:</strong> Adjust system volume and mute</li>
+          <li><strong>Music Controls:</strong> Control Music app playback</li>
+          <li><strong>System Controls:</strong> Lock screen and sleep display</li>
+        </ul>
+        
+        <h4>Connection Status</h4>
+        <ul>
+          <li><span class="status-dot status-green"></span> <strong>Green:</strong> Connected and ready</li>
+          <li><span class="status-dot status-yellow"></span> <strong>Yellow:</strong> Connecting or reconnecting</li>
+          <li><span class="status-dot status-red"></span> <strong>Red:</strong> Disconnected</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="/apps.js"></script>
+</body>
+</html>
