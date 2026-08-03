@@ -2,50 +2,176 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Remote Mouse" />
+  <meta name="theme-color" content="#0a0f0e" />
   <title>Remote Mouse</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body>
-  <div id="status-bar">
-    <div id="connection-status">
-      <div id="status-indicator" class="status-red"></div>
-      <span id="status-text">Connecting...</span>
+<body class="is-trackpad">
+  <header class="app-chrome" id="status-bar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+          <rect x="6" y="3" width="12" height="18" rx="6"/>
+          <line x1="12" y1="3" x2="12" y2="11"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">Remote Mouse</span>
+        <span class="brand-sub">Trackpad</span>
+      </div>
     </div>
-    <button id="info-btn" class="info-btn">ℹ</button>
+
+    <div class="chrome-actions">
+      <div id="drag-badge" class="drag-badge" hidden>Dragging</div>
+      <div id="connection-status" class="connection-status" aria-live="polite">
+        <div id="status-indicator" class="status-red" aria-hidden="true"></div>
+        <span id="status-text">Connecting…</span>
+      </div>
+      <button id="fullscreen-btn" class="icon-btn" type="button" aria-label="Fullscreen or install app">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true">
+          <polyline points="4 9 4 4 9 4"/>
+          <polyline points="20 9 20 4 15 4"/>
+          <polyline points="4 15 4 20 9 20"/>
+          <polyline points="20 15 20 20 15 20"/>
+        </svg>
+      </button>
+      <button id="info-btn" class="icon-btn info-btn" type="button" aria-label="How to use">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/>
+          <line x1="12" y1="11" x2="12" y2="16"/>
+          <circle cx="12" cy="8" r="0.8" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="pad-hint" id="pad-hint">
+    <p class="pad-hint-title">Touch to control</p>
+    <p class="pad-hint-sub">Your phone is the trackpad for your Mac</p>
+    <div class="pad-hint-gestures">
+      <span class="gesture-chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="14" height="14"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M5 18h14"/></svg>
+        Move
+      </span>
+      <span class="gesture-chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="14" height="14"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8" opacity="0.4"/></svg>
+        Tap
+      </span>
+      <span class="gesture-chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="14" height="14"><path d="M8 6v12"/><path d="M16 6v12"/><path d="M5 10h6"/><path d="M13 14h6"/></svg>
+        Scroll
+      </span>
+      <span class="gesture-chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="14" height="14"><path d="M12 5v10"/><circle cx="12" cy="18" r="1" fill="currentColor"/></svg>
+        Hold to drag
+      </span>
+    </div>
   </div>
-  
-  <div class="toolbar">
-    <a class="link" href="/apps.html">Controls →</a>
-  </div>
-  
-  <canvas id="pad"></canvas>
-  
-  <!-- Info Modal -->
-  <div id="info-modal" class="modal hidden">
+
+  <canvas id="pad" aria-label="Trackpad surface"></canvas>
+
+  <nav class="dock" aria-label="Primary">
+    <a class="dock-link is-active" href="/index.html" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true">
+        <rect x="6" y="3" width="12" height="18" rx="6"/>
+        <line x1="12" y1="3" x2="12" y2="11"/>
+      </svg>
+      Trackpad
+    </a>
+    <a class="dock-link" href="/apps.html">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true">
+        <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+        <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+      </svg>
+      Controls
+    </a>
+  </nav>
+
+  <div id="info-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="help-title" aria-hidden="true">
     <div class="modal-content">
       <div class="modal-header">
-        <h3>How to Use</h3>
-        <button id="close-modal" class="close-btn">×</button>
+        <h3 id="help-title">How to use</h3>
+        <button id="close-modal" class="close-btn" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18" aria-hidden="true">
+            <line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>
+          </svg>
+        </button>
       </div>
       <div class="modal-body">
-        <h4>Trackpad Mode</h4>
-        <ul>
-          <li><strong>One-finger move:</strong> Moves the cursor</li>
-          <li><strong>One-finger tap:</strong> Left click</li>
-          <li><strong>Two-finger move:</strong> Scroll</li>
+        <h4>Gestures</h4>
+        <ul class="help-list">
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="14" height="14"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/></svg>
+            </span>
+            <span><strong>One-finger drag</strong> — move the Mac cursor</span>
+          </li>
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14"><circle cx="12" cy="12" r="3"/></svg>
+            </span>
+            <span><strong>Tap</strong> — left click</span>
+          </li>
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="14" height="14"><path d="M8 6v12"/><path d="M16 6v12"/></svg>
+            </span>
+            <span><strong>Two-finger drag</strong> — scroll</span>
+          </li>
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="14" height="14"><path d="M12 5v10"/><circle cx="12" cy="18" r="1" fill="currentColor"/><path d="M7 10h10"/></svg>
+            </span>
+            <span><strong>Press & hold</strong>, then move — select / drag</span>
+          </li>
         </ul>
-        
-        <h4>Connection Status</h4>
-        <ul>
-          <li><span class="status-dot status-green"></span> <strong>Green:</strong> Connected and ready</li>
-          <li><span class="status-dot status-yellow"></span> <strong>Yellow:</strong> Connecting or reconnecting</li>
-          <li><span class="status-dot status-red"></span> <strong>Red:</strong> Disconnected</li>
+
+        <h4>Fullscreen</h4>
+        <ul class="help-list">
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14"><polyline points="4 9 4 4 9 4"/><polyline points="20 9 20 4 15 4"/></svg>
+            </span>
+            <span><strong>iPhone:</strong> Share → Add to Home Screen, then open the icon</span>
+          </li>
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14"><polyline points="4 15 4 20 9 20"/><polyline points="20 15 20 20 15 20"/></svg>
+            </span>
+            <span><strong>Android:</strong> browser menu → Install app / Add to Home screen</span>
+          </li>
         </ul>
+
+        <h4>Connection</h4>
+        <div class="status-legend">
+          <div class="status-legend-row">
+            <span class="status-dot status-green" aria-hidden="true"></span>
+            <span><strong>Green</strong> — connected and ready</span>
+          </div>
+          <div class="status-legend-row">
+            <span class="status-dot status-yellow" aria-hidden="true"></span>
+            <span><strong>Amber</strong> — connecting or reconnecting</span>
+          </div>
+          <div class="status-legend-row">
+            <span class="status-dot status-red" aria-hidden="true"></span>
+            <span><strong>Red</strong> — disconnected</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
-  
-  <script src="/script.js"></script>
+
+  <script src="/ui.js?v=5"></script>
+  <script src="/script.js?v=5"></script>
 </body>
 </html>

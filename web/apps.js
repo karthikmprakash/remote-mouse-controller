@@ -1,16 +1,28 @@
 (() => {
-  const statusIndicator = document.getElementById('status-indicator');
-  const statusText = document.getElementById('status-text');
-  const infoBtn = document.getElementById('info-btn');
-  const infoModal = document.getElementById('info-modal');
-  const closeModal = document.getElementById('close-modal');
+  const ui = window.RemoteUI || {};
+
+  ui.wireModal?.({
+    infoBtn: document.getElementById('info-btn'),
+    infoModal: document.getElementById('info-modal'),
+    closeModal: document.getElementById('close-modal'),
+  });
 
   function setStatus(text, status = 'yellow') {
-    statusText.textContent = text;
-    statusIndicator.className = `status-${status}`;
+    ui.setConnectionStatus?.(text, status);
   }
 
-  async function sendCommand(payload) {
+  function flashTile(btn, kind) {
+    btn.classList.remove('is-loading', 'is-success', 'is-error');
+    btn.classList.add(kind === 'ok' ? 'is-success' : 'is-error');
+    setTimeout(() => {
+      btn.classList.remove('is-success', 'is-error');
+    }, 700);
+  }
+
+  async function sendCommand(payload, btn) {
+    if (btn) {
+      btn.classList.add('is-loading', 'is-pressed');
+    }
     try {
       const res = await fetch('/api/command', {
         method: 'POST',
@@ -21,17 +33,21 @@
       if (!res.ok || data.status !== 'ok') {
         throw new Error(data.error || 'Command failed');
       }
-      setStatus('OK: ' + (data.message || 'Done'), 'green');
-      // Reset to connected status after 2 seconds
-      setTimeout(() => setStatus('Connected', 'green'), 2000);
+      const msg = data.message || 'Done';
+      ui.showToast?.(msg, 'ok');
+      ui.haptic?.(14);
+      if (btn) flashTile(btn, 'ok');
     } catch (e) {
-      setStatus('Error: ' + e.message, 'red');
-      // Reset to connected status after 3 seconds
-      setTimeout(() => setStatus('Connected', 'green'), 3000);
+      ui.showToast?.(e.message || 'Command failed', 'err', 2800);
+      ui.haptic?.([20, 40, 20]);
+      if (btn) flashTile(btn, 'err');
+      setStatus('Error', 'red');
+      setTimeout(() => setStatus('Connected', 'green'), 2500);
+    } finally {
+      if (btn) btn.classList.remove('is-loading', 'is-pressed');
     }
   }
 
-  // Check connection status
   function checkConnection() {
     fetch('/api/command', {
       method: 'POST',
@@ -44,50 +60,22 @@
     });
   }
 
-  // Initial connection check
-  setStatus('Connecting...', 'yellow');
+  setStatus('Connecting…', 'yellow');
   checkConnection();
-
-  // Check connection every 5 seconds
   setInterval(checkConnection, 5000);
 
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.tile');
     if (!btn) return;
     const type = btn.dataset.type;
+    ui.haptic?.(8);
 
     if (type === 'launch') {
-      const app = btn.dataset.app;
-      sendCommand({ type: 'launch', app });
+      sendCommand({ type: 'launch', app: btn.dataset.app }, btn);
     } else if (type === 'control') {
-      const action = btn.dataset.action;
-      sendCommand({ type: 'control', action });
+      sendCommand({ type: 'control', action: btn.dataset.action }, btn);
     } else if (type === 'open_url') {
-      const url = btn.dataset.url;
-      sendCommand({ type: 'open_url', url });
-    }
-  });
-
-  // Modal functionality
-  infoBtn.addEventListener('click', () => {
-    infoModal.classList.remove('hidden');
-  });
-
-  closeModal.addEventListener('click', () => {
-    infoModal.classList.add('hidden');
-  });
-
-  // Close modal when clicking outside
-  infoModal.addEventListener('click', (e) => {
-    if (e.target === infoModal) {
-      infoModal.classList.add('hidden');
-    }
-  });
-
-  // Close modal with Escape key
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !infoModal.classList.contains('hidden')) {
-      infoModal.classList.add('hidden');
+      sendCommand({ type: 'open_url', url: btn.dataset.url }, btn);
     }
   });
 })();

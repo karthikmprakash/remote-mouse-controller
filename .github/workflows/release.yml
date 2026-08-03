@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv pip install -r requirements.txt pyinstaller
+
+      - name: Build macOS binary
+        run: |
+          source .venv/bin/activate
+          pyinstaller \
+            --name RemoteMouseServer \
+            --onefile \
+            --console \
+            --noconfirm \
+            --clean \
+            --icon=app_icon.icns \
+            --add-data "web:web" \
+            --collect-all websockets \
+            --collect-all pynput \
+            --hidden-import=websockets \
+            --hidden-import=pynput \
+            --hidden-import=pynput.mouse \
+            --hidden-import=pynput.keyboard \
+            server/server.py
+
+      - name: Package artifact
+        run: |
+          ARCH="$(uname -m)"
+          if [ "$ARCH" = "arm64" ]; then
+            ASSET_ARCH="arm64"
+          else
+            ASSET_ARCH="x86_64"
+          fi
+          ZIP_NAME="RemoteMouseServer-macos-${ASSET_ARCH}.zip"
+          echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
+          cd dist
+          zip -9 "${ZIP_NAME}" RemoteMouseServer
+          ls -lh "${ZIP_NAME}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/${{ env.ZIP_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

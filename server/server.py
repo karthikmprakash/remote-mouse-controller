@@ -1,10 +1,10 @@
 import asyncio
 import json
-import os
 import socket
 import subprocess
 import sys
 import threading
+from collections import deque
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -20,9 +20,57 @@ SCROLL_MULTIPLIER = 1.0  # Positive dy scrolls up in pynput; we'll invert client
 
 mouse = MouseController()
 
-# Performance optimizations
-MOUSE_BATCH_SIZE = 3  # Process multiple movements at once
-MOUSE_THROTTLE_MS = 8  # Minimum time between mouse updates (8ms = ~120fps)
+class MovementWorker:
+    """Ordered mouse command worker with movement coalescing.
+
+    WebSocket input never blocks on the macOS accessibility API. If several
+    consecutive pointer samples arrive while macOS is applying one, they're
+    collapsed rather than replayed later as stale cursor motion.
+    """
+
+    def __init__(self):
+        self._condition = threading.Condition()
+        self._commands = deque()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def add(self, dx: float, dy: float) -> None:
+        with self._condition:
+            if self._commands and self._commands[-1][0] == "move":
+                _, queued_dx, queued_dy = self._commands[-1]
+                self._commands[-1] = ("move", queued_dx + dx, queued_dy + dy)
+            else:
+                self._commands.append(("move", dx, dy))
+            self._condition.notify()
+
+    def button(self, action: str, button, count: int = 1) -> None:
+        with self._condition:
+            self._commands.append((action, button, count))
+            self._condition.notify()
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while not self._commands:
+                    self._condition.wait()
+                command = self._commands.popleft()
+
+            try:
+                action = command[0]
+                if action == "move":
+                    _, dx, dy = command
+                    mouse.move(dx * MOVE_MULTIPLIER, dy * MOVE_MULTIPLIER)
+                elif action == "click":
+                    _, button, count = command
+                    mouse.click(button, count)
+                elif action == "down":
+                    mouse.press(command[1])
+                elif action == "up":
+                    mouse.release(command[1])
+            except Exception:
+                pass
+
+
+movement = MovementWorker()
 
 
 def get_lan_ip() -> str:
@@ -71,41 +119,6 @@ def parse_binary_message(data):
     return None
 
 
-# Mouse movement batching for better performance
-class MouseBatcher:
-    def __init__(self):
-        self.pending_moves = []
-        self.last_update = 0
-        self.lock = threading.Lock()
-
-    def add_move(self, dx, dy):
-        with self.lock:
-            self.pending_moves.append((dx, dy))
-
-    def process_moves(self):
-        with self.lock:
-            if not self.pending_moves:
-                return
-
-            # Combine multiple small movements
-            total_dx = sum(dx for dx, _ in self.pending_moves)
-            total_dy = sum(dy for _, dy in self.pending_moves)
-            self.pending_moves.clear()
-
-            # Apply movement
-            try:
-                x, y = mouse.position
-                mouse.position = (
-                    x + total_dx * MOVE_MULTIPLIER,
-                    y + total_dy * MOVE_MULTIPLIER,
-                )
-            except Exception:
-                pass
-
-
-mouse_batcher = MouseBatcher()
-
-
 async def handle_ws(websocket):
     # Optimize WebSocket for low latency
     try:
@@ -132,34 +145,23 @@ async def handle_ws(websocket):
             msg_type = data.get("type")
 
             if msg_type == "move":
-                dx = float(data.get("dx", 0))
-                dy = float(data.get("dy", 0))
-                mouse_batcher.add_move(dx, dy)
+                movement.add(float(data.get("dx", 0)), float(data.get("dy", 0)))
 
             elif msg_type == "click":
                 button_name = data.get("button", "left").lower()
                 count = int(data.get("count", 1))
                 button = Button.left if button_name == "left" else Button.right
-                try:
-                    mouse.click(button, count)
-                except Exception:
-                    pass
+                movement.button("click", button, count)
 
             elif msg_type == "down":
                 button_name = data.get("button", "left").lower()
                 button = Button.left if button_name == "left" else Button.right
-                try:
-                    mouse.press(button)
-                except Exception:
-                    pass
+                movement.button("down", button)
 
             elif msg_type == "up":
                 button_name = data.get("button", "left").lower()
                 button = Button.left if button_name == "left" else Button.right
-                try:
-                    mouse.release(button)
-                except Exception:
-                    pass
+                movement.button("up", button)
 
             elif msg_type == "scroll":
                 dx = float(data.get("dx", 0))
@@ -175,17 +177,7 @@ async def handle_ws(websocket):
             continue
 
 
-# Mouse processing loop
-async def mouse_processing_loop():
-    while True:
-        mouse_batcher.process_moves()
-        await asyncio.sleep(MOUSE_THROTTLE_MS / 1000.0)
-
-
 # ---------- macOS control helpers ----------
-import subprocess
-
-
 def run_detached(cmd):
     try:
         subprocess.Popen(cmd)
@@ -250,13 +242,27 @@ def prev_track():
 
 
 def lock_screen():
-    # Switch to login window (locks session)
-    return run_detached(
-        [
-            "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession",
-            "-suspend",
-        ]
-    )
+    # CGSession was removed on modern macOS. Prefer the login framework API,
+    # then fall back to the Control+Command+Q shortcut (needs Accessibility).
+    try:
+        import ctypes
+
+        login = ctypes.CDLL(
+            "/System/Library/PrivateFrameworks/login.framework/Versions/Current/login"
+        )
+        login.SACLockScreenImmediate()
+        return True, "Screen locked"
+    except Exception as primary_error:
+        ok, msg = run_output(
+            [
+                "osascript",
+                "-e",
+                'tell application "System Events" to keystroke "q" using {control down, command down}',
+            ]
+        )
+        if ok:
+            return True, "Screen locked"
+        return False, f"Lock failed ({primary_error}); fallback: {msg}"
 
 
 def sleep_display():
@@ -268,6 +274,13 @@ class StaticHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         web_dir = get_web_dir()
         super().__init__(*args, directory=str(web_dir), **kwargs)
+
+    def handle(self):
+        # Phones often reset the socket on background/nav; don't spam the console.
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError, TimeoutError):
+            pass
 
     def log_message(self, format, *args):
         return
@@ -353,13 +366,22 @@ def start_http_server():
 
 async def start_ws_server():
     print(f"WebSocket server listening on ws://0.0.0.0:{WS_PORT}")
-    async with websockets.serve(handle_ws, "0.0.0.0", WS_PORT, max_size=2**20):
+    # compression=None avoids per-frame deflate cost on tiny binary move packets
+    async with websockets.serve(
+        handle_ws,
+        "0.0.0.0",
+        WS_PORT,
+        max_size=2**20,
+        # Pointer packets become stale immediately. Keep the receive queue
+        # tiny so a slow cursor update cannot build seconds of bufferbloat.
+        max_queue=1,
+        compression=None,
+    ):
         await asyncio.Future()  # run forever
 
 
 async def async_main():
-    """Main async function to run both servers"""
-    await asyncio.gather(start_ws_server(), mouse_processing_loop())
+    await start_ws_server()
 
 
 def main():
