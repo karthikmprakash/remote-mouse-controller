@@ -25,11 +25,15 @@
       </div>
       <div class="brand-text">
         <span class="brand-name">Remote Mouse</span>
-        <span class="brand-sub">Trackpad</span>
+        <span class="brand-sub" id="mode-label">Trackpad</span>
       </div>
     </div>
 
     <div class="chrome-actions">
+      <div class="mode-toggle" role="group" aria-label="Pointer mode">
+        <button id="mode-trackpad" class="mode-btn is-active" type="button" aria-pressed="true">Pad</button>
+        <button id="mode-gyro" class="mode-btn" type="button" aria-pressed="false">Gyro</button>
+      </div>
       <div id="drag-badge" class="drag-badge" hidden>Dragging</div>
       <div id="connection-status" class="connection-status" aria-live="polite">
         <div id="status-indicator" class="status-red" aria-hidden="true"></div>
@@ -54,9 +58,9 @@
   </header>
 
   <div class="pad-hint" id="pad-hint">
-    <p class="pad-hint-title">Touch to control</p>
-    <p class="pad-hint-sub">Your phone is the trackpad for your Mac</p>
-    <div class="pad-hint-gestures">
+    <p class="pad-hint-title" id="pad-hint-title">Touch to control</p>
+    <p class="pad-hint-sub" id="pad-hint-sub">Your phone is the trackpad for your Mac</p>
+    <div class="pad-hint-gestures" id="pad-hint-gestures">
       <span class="gesture-chip">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="14" height="14"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M5 18h14"/></svg>
         Move
@@ -74,6 +78,19 @@
         Hold to drag
       </span>
     </div>
+  </div>
+
+  <div id="gyro-panel" class="gyro-panel hidden" aria-hidden="true">
+    <div class="gyro-actions">
+      <button id="gyro-left" class="gyro-btn" type="button">Left</button>
+      <button id="gyro-right" class="gyro-btn" type="button">Right</button>
+      <button id="gyro-drag" class="gyro-btn" type="button" aria-pressed="false">Drag</button>
+      <button id="gyro-recenter" class="gyro-btn gyro-btn--accent" type="button">Recenter</button>
+    </div>
+    <label class="gyro-sens" for="gyro-sensitivity">
+      <span>Sensitivity</span>
+      <input id="gyro-sensitivity" type="range" min="0.4" max="4" step="0.1" value="1.6" />
+    </label>
   </div>
 
   <canvas id="pad" aria-label="Trackpad surface"></canvas>
@@ -136,6 +153,28 @@
           </li>
         </ul>
 
+        <h4>Gyro mode</h4>
+        <ul class="help-list">
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14"><path d="M12 3v3"/><path d="M12 18v3"/><path d="M3 12h3"/><path d="M18 12h3"/><circle cx="12" cy="12" r="4"/></svg>
+            </span>
+            <span><strong>Tilt</strong> the phone to move the Mac cursor in real time</span>
+          </li>
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>
+            </span>
+            <span><strong>Recenter</strong> sets the current tilt as the zero point</span>
+          </li>
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14"><path d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7z"/></svg>
+            </span>
+            <span><strong>iPhone:</strong> open the <strong>https://</strong> URL from the server (sensors need a secure page)</span>
+          </li>
+        </ul>
+
         <h4>Fullscreen</h4>
         <ul class="help-list">
           <li>
@@ -171,7 +210,7 @@
     </div>
   </div>
 
-  <script src="/ui.js?v=6"></script>
-  <script src="/script.js?v=6"></script>
+  <script src="/ui.js?v=7"></script>
+  <script src="/script.js?v=7"></script>
 </body>
 </html>

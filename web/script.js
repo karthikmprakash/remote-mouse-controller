@@ -6,6 +6,7 @@
   const LONG_PRESS_MS = 350;
   const TAP_MOVE_SLOP = 12;
   const TAP_MAX_MS = 220;
+  let pointerMode = 'trackpad';
 
   ui.wireModal?.({
     infoBtn: document.getElementById('info-btn'),
@@ -117,7 +118,8 @@
   }
 
   function wsUrl() {
-    return `ws://${window.location.hostname}:8765`;
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${window.location.hostname}:8765`;
   }
 
   let ws;
@@ -290,6 +292,7 @@
   }
 
   function onTouchStart(e) {
+    if (pointerMode !== 'trackpad') return;
     e.preventDefault();
     ui.unlockAudio?.(); // unlock iOS audio for the long-press tick
     hideHint();
@@ -311,6 +314,7 @@
   }
 
   function onTouchMove(e) {
+    if (pointerMode !== 'trackpad') return;
     e.preventDefault();
     const t = e.touches[0];
     const dx = t.clientX - lastX;
@@ -338,6 +342,7 @@
   }
 
   function onTouchEnd(e) {
+    if (pointerMode !== 'trackpad') return;
     e.preventDefault();
     clearLongPress();
 
@@ -370,6 +375,7 @@
 
   let mouseDown = false;
   pad.addEventListener('mousedown', (e) => {
+    if (pointerMode !== 'trackpad') return;
     ui.unlockAudio?.();
     hideHint();
     mouseDown = true;
@@ -382,7 +388,7 @@
     schedulePaint(lastX, lastY, { dragging: false, progress: 0 });
   });
   pad.addEventListener('mousemove', (e) => {
-    if (!mouseDown) return;
+    if (pointerMode !== 'trackpad' || !mouseDown) return;
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
     lastX = e.clientX;
@@ -393,7 +399,7 @@
     schedulePaint(lastX, lastY, { dragging: isDragging, progress: isDragging ? 1 : 0 });
   });
   pad.addEventListener('mouseup', () => {
-    if (!mouseDown) return;
+    if (pointerMode !== 'trackpad' || !mouseDown) return;
     mouseDown = false;
     clearLongPress();
     const dt = performance.now() - touchStartTime;
@@ -405,7 +411,7 @@
     clearTouch();
   });
   pad.addEventListener('mouseleave', () => {
-    if (!mouseDown) return;
+    if (pointerMode !== 'trackpad' || !mouseDown) return;
     mouseDown = false;
     clearLongPress();
     if (isDragging) endDrag();
@@ -420,6 +426,270 @@
     if (document.hidden) {
       clearLongPress();
       if (isDragging) endDrag();
+      gyroPaused = true;
+    } else if (pointerMode === 'gyro') {
+      gyroPaused = false;
     }
   });
+
+  // ── Gyro / DeviceOrientation mode ───────────────────────────
+  let gyroActive = false;
+  let gyroPaused = false;
+  let gyroListening = false;
+  let calBeta = 0;
+  let calGamma = 0;
+  let lastOrient = null;
+  let gyroSensitivity = 1.6;
+  const GYRO_DEADZONE = 1.2; // degrees
+  const GYRO_MAX_STEP = 48; // px per frame clamp
+
+  const modeLabel = document.getElementById('mode-label');
+  const modeTrackpadBtn = document.getElementById('mode-trackpad');
+  const modeGyroBtn = document.getElementById('mode-gyro');
+  const gyroPanel = document.getElementById('gyro-panel');
+  const gyroLeftBtn = document.getElementById('gyro-left');
+  const gyroRightBtn = document.getElementById('gyro-right');
+  const gyroDragBtn = document.getElementById('gyro-drag');
+  const gyroRecenterBtn = document.getElementById('gyro-recenter');
+  const gyroSensInput = document.getElementById('gyro-sensitivity');
+  const hintTitle = document.getElementById('pad-hint-title');
+  const hintSub = document.getElementById('pad-hint-sub');
+
+  const TRACKPAD_HINT = {
+    title: 'Touch to control',
+    sub: 'Your phone is the trackpad for your Mac',
+  };
+  const GYRO_HINT = {
+    title: 'Tilt to move',
+    sub: 'Hold the phone and tilt — use the buttons below to click',
+  };
+
+  function isSecureEnoughForSensors() {
+    return window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  }
+
+  function sensorsSupported() {
+    return typeof window.DeviceOrientationEvent !== 'undefined';
+  }
+
+  async function requestOrientationPermission() {
+    if (
+      typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function'
+    ) {
+      if (!isSecureEnoughForSensors()) {
+        throw new Error('Gyro on iPhone needs the https:// URL printed by the server');
+      }
+      const state = await DeviceOrientationEvent.requestPermission();
+      if (state !== 'granted') {
+        throw new Error('Motion permission denied');
+      }
+    }
+  }
+
+  function recenterGyro(sample) {
+    if (sample && Number.isFinite(sample.beta) && Number.isFinite(sample.gamma)) {
+      calBeta = sample.beta;
+      calGamma = sample.gamma;
+    } else if (lastOrient) {
+      calBeta = lastOrient.beta;
+      calGamma = lastOrient.gamma;
+    }
+    ui.showToast?.('Gyro recentered', 'ok');
+    ui.haptic?.(16, 'soft');
+  }
+
+  function paintGyroCursor(nx, ny) {
+    // nx/ny are normalized tilt offsets roughly -1..1
+    const x = window.innerWidth * 0.5 + nx * window.innerWidth * 0.28;
+    const y = window.innerHeight * 0.45 + ny * window.innerHeight * 0.22;
+    schedulePaint(x, y, { dragging: isDragging, progress: isDragging ? 1 : 0 });
+  }
+
+  function onDeviceOrientation(e) {
+    if (!gyroActive || gyroPaused || pointerMode !== 'gyro') return;
+    if (e.beta == null || e.gamma == null) return;
+
+    const beta = e.beta;
+    const gamma = e.gamma;
+    lastOrient = { beta, gamma };
+
+    // First sample after enable → calibrate
+    if (calBeta === null || calGamma === null || Number.isNaN(calBeta)) {
+      calBeta = beta;
+      calGamma = gamma;
+    }
+
+    let dGamma = gamma - calGamma;
+    let dBeta = beta - calBeta;
+
+    // Deadzone so resting hand doesn't drift
+    if (Math.abs(dGamma) < GYRO_DEADZONE) dGamma = 0;
+    if (Math.abs(dBeta) < GYRO_DEADZONE) dBeta = 0;
+
+    // gamma = left/right tilt → dx; beta = forward/back → dy
+    let dx = dGamma * gyroSensitivity;
+    let dy = dBeta * gyroSensitivity;
+    dx = Math.max(-GYRO_MAX_STEP, Math.min(GYRO_MAX_STEP, dx));
+    dy = Math.max(-GYRO_MAX_STEP, Math.min(GYRO_MAX_STEP, dy));
+
+    if (dx !== 0 || dy !== 0) {
+      sendMove(dx, dy);
+    }
+
+    paintGyroCursor(
+      Math.max(-1, Math.min(1, dGamma / 30)),
+      Math.max(-1, Math.min(1, dBeta / 30)),
+    );
+  }
+
+  function startGyroListening() {
+    if (gyroListening) return;
+    window.addEventListener('deviceorientation', onDeviceOrientation, true);
+    gyroListening = true;
+  }
+
+  function stopGyroListening() {
+    if (!gyroListening) return;
+    window.removeEventListener('deviceorientation', onDeviceOrientation, true);
+    gyroListening = false;
+  }
+
+  function setGyroPanelVisible(visible) {
+    if (!gyroPanel) return;
+    gyroPanel.classList.toggle('hidden', !visible);
+    gyroPanel.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  }
+
+  function updateModeChrome() {
+    const isGyro = pointerMode === 'gyro';
+    document.body.classList.toggle('is-gyro', isGyro);
+    if (modeLabel) modeLabel.textContent = isGyro ? 'Gyro' : 'Trackpad';
+    if (modeTrackpadBtn) {
+      modeTrackpadBtn.classList.toggle('is-active', !isGyro);
+      modeTrackpadBtn.setAttribute('aria-pressed', String(!isGyro));
+    }
+    if (modeGyroBtn) {
+      modeGyroBtn.classList.toggle('is-active', isGyro);
+      modeGyroBtn.setAttribute('aria-pressed', String(isGyro));
+    }
+    setGyroPanelVisible(isGyro && gyroActive);
+    if (hintTitle && hintSub && padHint && !padHint.classList.contains('is-hidden')) {
+      const copy = isGyro ? GYRO_HINT : TRACKPAD_HINT;
+      hintTitle.textContent = copy.title;
+      hintSub.textContent = copy.sub;
+    }
+  }
+
+  async function enableGyro() {
+    if (!sensorsSupported()) {
+      ui.showToast?.('This browser has no orientation sensors', 'err', 3200);
+      return false;
+    }
+    try {
+      await requestOrientationPermission();
+    } catch (err) {
+      ui.showToast?.(err.message || 'Sensor permission failed', 'warn', 4200);
+      return false;
+    }
+
+    calBeta = NaN;
+    calGamma = NaN;
+    lastOrient = null;
+    gyroActive = true;
+    gyroPaused = false;
+    startGyroListening();
+    setGyroPanelVisible(true);
+    if (padHint) padHint.classList.remove('is-hidden');
+    if (hintTitle && hintSub) {
+      hintTitle.textContent = GYRO_HINT.title;
+      hintSub.textContent = GYRO_HINT.sub;
+    }
+    ui.showToast?.('Gyro on — tilt to move', 'ok');
+    ui.haptic?.(18, 'strong');
+    return true;
+  }
+
+  function disableGyro() {
+    gyroActive = false;
+    stopGyroListening();
+    setGyroPanelVisible(false);
+    clearTouch();
+    if (isDragging) endDrag();
+    if (gyroDragBtn) {
+      gyroDragBtn.classList.remove('is-active');
+      gyroDragBtn.setAttribute('aria-pressed', 'false');
+    }
+  }
+
+  async function setPointerMode(mode) {
+    if (mode === pointerMode) {
+      if (mode === 'gyro' && !gyroActive) await enableGyro();
+      return;
+    }
+
+    if (mode === 'gyro') {
+      clearLongPress();
+      if (isDragging) endDrag();
+      mouseDown = false;
+      const ok = await enableGyro();
+      if (!ok) {
+        updateModeChrome();
+        return;
+      }
+      pointerMode = 'gyro';
+    } else {
+      disableGyro();
+      pointerMode = 'trackpad';
+      if (hintTitle && hintSub) {
+        hintTitle.textContent = TRACKPAD_HINT.title;
+        hintSub.textContent = TRACKPAD_HINT.sub;
+      }
+      if (padHint) padHint.classList.remove('is-hidden');
+    }
+    updateModeChrome();
+  }
+
+  modeTrackpadBtn?.addEventListener('click', () => {
+    ui.unlockAudio?.();
+    setPointerMode('trackpad');
+  });
+  modeGyroBtn?.addEventListener('click', () => {
+    ui.unlockAudio?.();
+    setPointerMode('gyro');
+  });
+
+  gyroLeftBtn?.addEventListener('click', () => {
+    sendBinary(2, 0, 0, 1, 1);
+    ui.haptic?.(12);
+  });
+  gyroRightBtn?.addEventListener('click', () => {
+    sendBinary(2, 0, 0, 2, 1);
+    ui.haptic?.(12);
+  });
+  gyroRecenterBtn?.addEventListener('click', () => {
+    recenterGyro(lastOrient);
+  });
+  gyroDragBtn?.addEventListener('click', () => {
+    if (isDragging) {
+      endDrag();
+      gyroDragBtn.classList.remove('is-active');
+      gyroDragBtn.setAttribute('aria-pressed', 'false');
+      ui.showToast?.('Drag off', 'ok');
+    } else {
+      beginDrag();
+      gyroDragBtn.classList.add('is-active');
+      gyroDragBtn.setAttribute('aria-pressed', 'true');
+      ui.showToast?.('Drag on', 'ok');
+    }
+  });
+  gyroSensInput?.addEventListener('input', () => {
+    const v = parseFloat(gyroSensInput.value);
+    if (Number.isFinite(v)) gyroSensitivity = v;
+  });
+  if (gyroSensInput) {
+    gyroSensitivity = parseFloat(gyroSensInput.value) || 1.6;
+  }
+
+  updateModeChrome();
 })();

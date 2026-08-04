@@ -620,15 +620,83 @@ class StaticHandler(SimpleHTTPRequestHandler):
             return self._json(500, {"status": "error", "error": str(e)})
 
 
-def start_http_server():
+def ensure_tls_certs():
+    """Create a reusable self-signed cert so phones can use Gyro (needs HTTPS)."""
+    cert_dir = Path.home() / ".remote-mouse"
+    cert_file = cert_dir / "cert.pem"
+    key_file = cert_dir / "key.pem"
+    if cert_file.exists() and key_file.exists():
+        return cert_file, key_file
+
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    openssl = shutil.which("openssl")
+    if not openssl:
+        return None, None
+
+    # SAN includes LAN IP so mobile Safari accepts the host more readily
+    # after the user trusts the cert once.
+    ip = get_lan_ip()
+    san = f"subjectAltName=DNS:localhost,IP:127.0.0.1,IP:{ip}"
+    base_cmd = [
+        openssl,
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-sha256",
+        "-days",
+        "825",
+        "-nodes",
+        "-keyout",
+        str(key_file),
+        "-out",
+        str(cert_file),
+        "-subj",
+        "/CN=Remote Mouse",
+    ]
+    try:
+        subprocess.run(
+            base_cmd + ["-addext", san],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return cert_file, key_file
+    except Exception:
+        try:
+            subprocess.run(
+                base_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return cert_file, key_file
+        except Exception as e:
+            print(f"Could not create TLS certificate: {e}")
+            try:
+                if cert_file.exists():
+                    cert_file.unlink()
+                if key_file.exists():
+                    key_file.unlink()
+            except Exception:
+                pass
+            return None, None
+
+
+def start_http_server(ssl_context=None):
     server_address = ("0.0.0.0", HTTP_PORT)
     httpd = ThreadingHTTPServer(server_address, StaticHandler)
-    print(f"HTTP server listening on http://0.0.0.0:{HTTP_PORT}")
+    scheme = "http"
+    if ssl_context is not None:
+        httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
+        scheme = "https"
+    print(f"{scheme.upper()} server listening on {scheme}://0.0.0.0:{HTTP_PORT}")
     httpd.serve_forever()
 
 
-async def start_ws_server():
-    print(f"WebSocket server listening on ws://0.0.0.0:{WS_PORT}")
+async def start_ws_server(ssl_context=None):
+    scheme = "wss" if ssl_context is not None else "ws"
+    print(f"WebSocket server listening on {scheme}://0.0.0.0:{WS_PORT}")
     # compression=None avoids per-frame deflate cost on tiny binary move packets
     async with websockets.serve(
         handle_ws,
@@ -639,30 +707,48 @@ async def start_ws_server():
         # tiny so a slow cursor update cannot build seconds of bufferbloat.
         max_queue=1,
         compression=None,
+        ssl=ssl_context,
     ):
         await asyncio.Future()  # run forever
 
 
-async def async_main():
-    await start_ws_server()
+async def async_main(ssl_context=None):
+    await start_ws_server(ssl_context)
 
 
 def main():
+    import ssl
+
     ip = get_lan_ip()
+    cert_file, key_file = ensure_tls_certs()
+    ssl_context = None
+    if cert_file and key_file:
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(certfile=str(cert_file), keyfile=str(key_file))
+
+    scheme = "https" if ssl_context else "http"
     print("Remote Mouse Server (Optimized)")
     print("===============================")
-    print(f"Open on your phone: http://{ip}:{HTTP_PORT}")
-    print(f"Controls page:      http://{ip}:{HTTP_PORT}/apps.html")
+    print(f"Open on your phone: {scheme}://{ip}:{HTTP_PORT}")
+    print(f"Controls page:      {scheme}://{ip}:{HTTP_PORT}/apps.html")
+    if ssl_context:
+        print("Gyro mode needs HTTPS — if the browser warns about the certificate,")
+        print("tap Advanced → Proceed (or install/trust ~/.remote-mouse/cert.pem).")
+    else:
+        print("TLS cert not available (openssl missing) — Gyro may be blocked on iPhone.")
+        print("Install openssl or open the page via a trusted HTTPS tunnel.")
     print("If the cursor does not move, grant Accessibility permissions:")
     print(
         "System Settings → Privacy & Security → Accessibility → enable Terminal/Python"
     )
 
-    http_thread = threading.Thread(target=start_http_server, daemon=True)
+    http_thread = threading.Thread(
+        target=start_http_server, kwargs={"ssl_context": ssl_context}, daemon=True
+    )
     http_thread.start()
 
     try:
-        asyncio.run(async_main())
+        asyncio.run(async_main(ssl_context))
     except KeyboardInterrupt:
         pass
 

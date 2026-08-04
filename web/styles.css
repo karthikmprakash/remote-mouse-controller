@@ -340,6 +340,138 @@ a { color: inherit; text-decoration: none; }
   background: var(--accent);
 }
 
+/* ── Mode toggle (Pad / Gyro) ──────────────────────────────── */
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border);
+}
+
+.mode-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-radius: 7px;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.mode-btn.is-active {
+  background: var(--accent);
+  color: var(--fg-inverse);
+}
+
+.mode-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Gyro control panel ────────────────────────────────────── */
+.gyro-panel {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--safe-bottom) + var(--dock-h) + var(--space-4));
+  z-index: 900;
+  width: min(92vw, 420px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: var(--shadow-md);
+}
+
+.gyro-panel.hidden {
+  display: none;
+}
+
+.gyro-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+
+.gyro-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-surface-solid);
+  color: var(--fg-primary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 12px 8px;
+  border-radius: var(--radius-sm);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+
+.gyro-btn:active {
+  transform: scale(0.97);
+  background: var(--bg-interactive-active);
+}
+
+.gyro-btn.is-active {
+  border-color: var(--warm);
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--warm);
+}
+
+.gyro-btn--accent {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
+.gyro-sens {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-secondary);
+}
+
+.gyro-sens span {
+  flex: 0 0 auto;
+  min-width: 72px;
+}
+
+.gyro-sens input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 28px;
+}
+
+body.is-gyro #pad {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(245, 158, 11, 0.06) 0%, transparent 40%),
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    radial-gradient(1200px 800px at 50% 50%, #101816 0%, var(--bg-base) 72%);
+  background-size: auto, 28px 28px, 28px 28px, auto;
+}
+
+@media (max-width: 380px) {
+  .mode-btn {
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+  .gyro-actions {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 /* ── Trackpad hint ─────────────────────────────────────────── */
 .pad-hint {
   position: fixed;
