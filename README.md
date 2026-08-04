@@ -24,23 +24,21 @@ Then, on your phone (connected to the same Wi‑Fi), open the URL printed in the
 - One-finger move: moves the cursor
 - One-finger tap: left click
 - Two-finger move: scroll
+- Press & hold, then move: drag / select
 
-### Gyro/Accelerometer Mode
-- Tilt your phone to move the cursor
-- On-screen buttons for:
-  - **Left Click**: Single left mouse click
-  - **Right Click**: Single right mouse click
-  - **Recenter**: Reset the gyro calibration point
-  - **Drag**: Toggle drag mode (hold left mouse button)
-- Adjustable sensitivity slider
-- Automatic sensor detection and permission handling
+### Controls Page (`/apps.html`)
+- Launch common Mac apps (VS Code, Safari, Spotify, etc.)
+- Volume, mute, and system-wide media play/pause/next/prev (works with Spotify, Music, browser media)
+- System actions: Spotlight, Mission Control, Show Desktop, Screenshot, Dark Mode, Sleep Display, Lock, Quit frontmost app
+- Edit shortcuts: Copy, Paste, Undo, Select All
+- Open a local URL (e.g. `localhost:3000`)
 
 ## Features
-- **Mode Toggle**: Switch between trackpad and gyro modes
-- **Sensor Support**: Uses gyroscope and accelerometer when available
-- **Sensitivity Control**: Adjust gyro sensitivity in real-time
-- **Drag Mode**: Toggle continuous left-click holding for dragging
-- **Recenter**: Reset gyro calibration when needed
+- **Mode Toggle**: Switch between trackpad and controls via the bottom dock
+- **System Media Keys**: Playback buttons use macOS media keys (not Apple Music only)
+- **Honest Feedback**: Failed launches/commands show an error toast instead of a false success
+- **Sensitivity Control**: Adjust gyro sensitivity in real-time (legacy)
+- **Drag Mode**: Press & hold on the trackpad to drag
 - **Responsive Design**: Works on phones and tablets
 
 ## Performance Optimizations

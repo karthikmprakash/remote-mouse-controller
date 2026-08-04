@@ -576,6 +576,16 @@ a { color: inherit; text-decoration: none; }
   gap: var(--space-3);
 }
 
+.media-row.edit-row {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+@media (max-width: 380px) {
+  .media-row.edit-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 .media-row .tile {
   align-items: center;
   min-height: 76px;

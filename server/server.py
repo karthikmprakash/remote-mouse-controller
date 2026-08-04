@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shutil
 import socket
 import subprocess
 import sys
@@ -7,10 +8,18 @@ import threading
 from collections import deque
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlparse
 
 import websockets
 from pynput.mouse import Button
 from pynput.mouse import Controller as MouseController
+
+try:
+    from pynput.keyboard import Controller as KeyboardController
+    from pynput.keyboard import Key
+except Exception:  # pragma: no cover - platform / permission dependent
+    KeyboardController = None
+    Key = None
 
 # Configuration
 HTTP_PORT = 8000
@@ -19,6 +28,19 @@ MOVE_MULTIPLIER = 1.5  # Increase if movement feels slow
 SCROLL_MULTIPLIER = 1.0  # Positive dy scrolls up in pynput; we'll invert client dy
 
 mouse = MouseController()
+keyboard = KeyboardController() if KeyboardController else None
+
+# Friendly names → macOS application names for `open -a`
+APP_ALIASES = {
+    "vscode": "Visual Studio Code",
+    "vs code": "Visual Studio Code",
+    "code": "Visual Studio Code",
+    "chrome": "Google Chrome",
+    "iterm": "iTerm",
+    "iterm2": "iTerm",
+    "settings": "System Settings",
+    "system preferences": "System Settings",
+}
 
 class MovementWorker:
     """Ordered mouse command worker with movement coalescing.
@@ -178,32 +200,74 @@ async def handle_ws(websocket):
 
 
 # ---------- macOS control helpers ----------
-def run_detached(cmd):
+def run_checked(cmd, timeout: float = 12, success_message: str = "ok"):
+    """Run a command and report real success/failure (unlike fire-and-forget Popen)."""
     try:
-        subprocess.Popen(cmd)
-        return True, "ok"
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or "").strip()
+            if not err:
+                err = f"Command failed (exit {result.returncode})"
+            return False, err
+        out = (result.stdout or "").strip()
+        return True, out or success_message
+    except subprocess.TimeoutExpired:
+        return False, "Command timed out"
+    except FileNotFoundError as e:
+        return False, f"Command not found: {e.filename or cmd[0]}"
     except Exception as e:
         return False, str(e)
 
 
-def run_output(cmd):
-    try:
-        out = subprocess.check_output(cmd)
-        return True, out.decode("utf-8").strip()
-    except Exception as e:
-        return False, str(e)
+def run_osascript(*lines: str, success_message: str = "ok"):
+    cmd = ["osascript"]
+    for line in lines:
+        cmd.extend(["-e", line])
+    return run_checked(cmd, success_message=success_message)
+
+
+def resolve_app_name(app_name: str) -> str:
+    name = (app_name or "").strip()
+    if not name:
+        return name
+    return APP_ALIASES.get(name.lower(), name)
 
 
 def open_app(app_name: str):
-    return run_detached(["open", "-a", app_name])
+    app = resolve_app_name(app_name)
+    if not app:
+        return False, "No app name provided"
+    # `open -a` returns non-zero when the app cannot be found.
+    ok, msg = run_checked(
+        ["open", "-a", app],
+        success_message=f"Launched {app}",
+    )
+    if ok:
+        return True, f"Launched {app}"
+    return False, msg or f"Could not open {app}"
 
 
 def open_url(url: str):
-    return run_detached(["open", url])
+    url = (url or "").strip()
+    if not url:
+        return False, "No URL provided"
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https", "file"}:
+        return False, "URL must start with http://, https://, or file://"
+    ok, msg = run_checked(["open", url], success_message=f"Opened {url}")
+    if ok:
+        return True, f"Opened {url}"
+    return False, msg
 
 
 def get_volume() -> int:
-    ok, out = run_output(["osascript", "-e", "output volume of (get volume settings)"])
+    ok, out = run_osascript("output volume of (get volume settings)")
     if ok:
         try:
             return max(0, min(100, int(out)))
@@ -214,31 +278,138 @@ def get_volume() -> int:
 
 def set_volume(v: int):
     v = max(0, min(100, int(v)))
-    return run_detached(["osascript", "-e", f"set volume output volume {v}"])
+    ok, msg = run_osascript(
+        f"set volume output volume {v}",
+        success_message=f"Volume {v}%",
+    )
+    if ok:
+        return True, f"Volume {v}%"
+    return False, msg
 
 
 def toggle_mute():
-    ok, out = run_output(["osascript", "-e", "output muted of (get volume settings)"])
+    ok, out = run_osascript("output muted of (get volume settings)")
+    if not ok:
+        return False, out
+    is_muted = out.lower() == "true"
+    new_muted = not is_muted
+    ok, msg = run_osascript(
+        f"set volume output muted {str(new_muted).lower()}",
+        success_message="Muted" if new_muted else "Unmuted",
+    )
     if ok:
-        is_muted = out.lower() == "true"
-        return run_detached(
-            ["osascript", "-e", f"set volume output muted {str(not is_muted).lower()}"]
-        )
-    return False, out
+        return True, "Muted" if new_muted else "Unmuted"
+    return False, msg
 
 
-def play_pause_music():
-    return run_detached(["osascript", "-e", 'tell application "Music" to playpause'])
+def tap_media_key(key_name: str):
+    """Send a system media key so Spotify/YouTube/Music all respond."""
+    key_map = {}
+    if Key is not None:
+        key_map = {
+            "play_pause": getattr(Key, "media_play_pause", None),
+            "next_track": getattr(Key, "media_next", None),
+            "prev_track": getattr(Key, "media_previous", None),
+            "mute_toggle": getattr(Key, "media_volume_mute", None),
+            "volume_up": getattr(Key, "media_volume_up", None),
+            "volume_down": getattr(Key, "media_volume_down", None),
+        }
+    key = key_map.get(key_name)
+    if keyboard is not None and key is not None:
+        try:
+            keyboard.press(key)
+            keyboard.release(key)
+            labels = {
+                "play_pause": "Play / Pause",
+                "next_track": "Next track",
+                "prev_track": "Previous track",
+                "mute_toggle": "Mute toggled",
+                "volume_up": "Volume up",
+                "volume_down": "Volume down",
+            }
+            return True, labels.get(key_name, "ok")
+        except Exception:
+            pass
+    return False, "media key unavailable"
+
+
+def _media_app_fallback(action: str):
+    """Fall back to whichever media app is running (Spotify, then Music)."""
+    scripts = {
+        "play_pause": (
+            'if application "Spotify" is running then\n'
+            '  tell application "Spotify" to playpause\n'
+            'else\n'
+            '  tell application "Music" to playpause\n'
+            "end if"
+        ),
+        "next_track": (
+            'if application "Spotify" is running then\n'
+            '  tell application "Spotify" to next track\n'
+            'else\n'
+            '  tell application "Music" to next track\n'
+            "end if"
+        ),
+        "prev_track": (
+            'if application "Spotify" is running then\n'
+            '  tell application "Spotify" to previous track\n'
+            'else\n'
+            '  tell application "Music" to previous track\n'
+            "end if"
+        ),
+    }
+    script = scripts.get(action)
+    if not script:
+        return False, "unsupported media action"
+    return run_checked(
+        ["osascript", "-e", script],
+        success_message="Media command sent",
+    )
+
+
+def play_pause_media():
+    ok, msg = tap_media_key("play_pause")
+    if ok:
+        return ok, msg
+    return _media_app_fallback("play_pause")
 
 
 def next_track():
-    return run_detached(["osascript", "-e", 'tell application "Music" to next track'])
+    ok, msg = tap_media_key("next_track")
+    if ok:
+        return ok, msg
+    return _media_app_fallback("next_track")
 
 
 def prev_track():
-    return run_detached(
-        ["osascript", "-e", 'tell application "Music" to previous track']
-    )
+    ok, msg = tap_media_key("prev_track")
+    if ok:
+        return ok, msg
+    return _media_app_fallback("prev_track")
+
+
+def volume_up():
+    # Prefer OS volume API for reliable step size + feedback; media key as backup.
+    v = min(100, get_volume() + 10)
+    ok, msg = set_volume(v)
+    if ok:
+        return ok, msg
+    return tap_media_key("volume_up")
+
+
+def volume_down():
+    v = max(0, get_volume() - 10)
+    ok, msg = set_volume(v)
+    if ok:
+        return ok, msg
+    return tap_media_key("volume_down")
+
+
+def mute_toggle():
+    ok, msg = toggle_mute()
+    if ok:
+        return ok, msg
+    return tap_media_key("mute_toggle")
 
 
 def lock_screen():
@@ -253,12 +424,9 @@ def lock_screen():
         login.SACLockScreenImmediate()
         return True, "Screen locked"
     except Exception as primary_error:
-        ok, msg = run_output(
-            [
-                "osascript",
-                "-e",
-                'tell application "System Events" to keystroke "q" using {control down, command down}',
-            ]
+        ok, msg = run_osascript(
+            'tell application "System Events" to keystroke "q" using {control down, command down}',
+            success_message="Screen locked",
         )
         if ok:
             return True, "Screen locked"
@@ -266,7 +434,107 @@ def lock_screen():
 
 
 def sleep_display():
-    return run_detached(["pmset", "displaysleepnow"])
+    if shutil.which("pmset"):
+        return run_checked(["pmset", "displaysleepnow"], success_message="Display sleeping")
+    return False, "pmset not available"
+
+
+def keystroke(keys, using=None, success_message="ok"):
+    if using:
+        script = f'tell application "System Events" to keystroke "{keys}" using {using}'
+    else:
+        script = f'tell application "System Events" to keystroke "{keys}"'
+    return run_osascript(script, success_message=success_message)
+
+
+def key_code(code, using=None, success_message="ok"):
+    if using:
+        script = f'tell application "System Events" to key code {code} using {using}'
+    else:
+        script = f'tell application "System Events" to key code {code}'
+    return run_osascript(script, success_message=success_message)
+
+
+def mission_control():
+    # Control + Up Arrow
+    return key_code(126, "{control down}", "Mission Control")
+
+
+def show_desktop():
+    # Mission Control "Show Desktop" — F11 / fn varies; Control+Down is App Exposé.
+    # Use the standard keyboard shortcut Control + Command + F3 equivalent via key code 103
+    # (Show Desktop on many Macs is Mission Control desktop button). Prefer Spotlight-free:
+    return key_code(103, success_message="Show Desktop")
+
+
+def spotlight():
+    return keystroke(" ", "{command down}", "Spotlight")
+
+
+def screenshot_selection():
+    return keystroke("4", "{command down, shift down}", "Screenshot selection")
+
+
+def screenshot_screen():
+    return keystroke("3", "{command down, shift down}", "Screenshot saved")
+
+
+def copy_clipboard():
+    return keystroke("c", "{command down}", "Copied")
+
+
+def paste_clipboard():
+    return keystroke("v", "{command down}", "Pasted")
+
+
+def undo_action():
+    return keystroke("z", "{command down}", "Undo")
+
+
+def select_all():
+    return keystroke("a", "{command down}", "Select All")
+
+
+def empty_trash():
+    return run_osascript(
+        'tell application "Finder" to empty trash',
+        success_message="Trash emptied",
+    )
+
+
+def toggle_dark_mode():
+    return run_osascript(
+        'tell application "System Events" to tell appearance preferences to set dark mode to not dark mode',
+        success_message="Appearance toggled",
+    )
+
+
+def quit_frontmost():
+    return keystroke("q", "{command down}", "Quit frontmost app")
+
+
+CONTROL_ACTIONS = {
+    "volume_up": volume_up,
+    "volume_down": volume_down,
+    "mute_toggle": mute_toggle,
+    "play_pause": play_pause_media,
+    "next_track": next_track,
+    "prev_track": prev_track,
+    "lock": lock_screen,
+    "sleep_display": sleep_display,
+    "mission_control": mission_control,
+    "show_desktop": show_desktop,
+    "spotlight": spotlight,
+    "screenshot": screenshot_selection,
+    "screenshot_full": screenshot_screen,
+    "copy": copy_clipboard,
+    "paste": paste_clipboard,
+    "undo": undo_action,
+    "select_all": select_all,
+    "empty_trash": empty_trash,
+    "dark_mode": toggle_dark_mode,
+    "quit_front": quit_frontmost,
+}
 
 
 # ---------- HTTP handler ----------
@@ -306,53 +574,48 @@ class StaticHandler(SimpleHTTPRequestHandler):
 
         t = data.get("type")
         try:
+            if t == "ping":
+                return self._json(200, {"status": "ok", "message": "pong"})
+
             if t == "launch":
                 app = data.get("app", "")
                 ok, msg = open_app(app)
-                return self._json(
-                    200 if ok else 500,
-                    {"status": "ok" if ok else "error", "message": msg},
-                )
+                payload = {"status": "ok" if ok else "error"}
+                if ok:
+                    payload["message"] = msg
+                else:
+                    payload["error"] = msg
+                    payload["message"] = msg
+                return self._json(200 if ok else 500, payload)
 
-            elif t == "open_url":
+            if t == "open_url":
                 url = data.get("url", "")
                 ok, msg = open_url(url)
-                return self._json(
-                    200 if ok else 500,
-                    {"status": "ok" if ok else "error", "message": msg},
-                )
-
-            elif t == "control":
-                action = data.get("action")
-                if action == "volume_up":
-                    v = get_volume()
-                    ok, msg = set_volume(v + 10)
-                    print(f"Volume up: {v + 10}")
-                elif action == "volume_down":
-                    v = get_volume()
-                    ok, msg = set_volume(v - 10)
-                elif action == "mute_toggle":
-                    ok, msg = toggle_mute()
-                elif action == "play_pause":
-                    ok, msg = play_pause_music()
-                elif action == "next_track":
-                    ok, msg = next_track()
-                elif action == "prev_track":
-                    ok, msg = prev_track()
-                elif action == "lock":
-                    ok, msg = lock_screen()
-                elif action == "sleep_display":
-                    ok, msg = sleep_display()
+                payload = {"status": "ok" if ok else "error"}
+                if ok:
+                    payload["message"] = msg
                 else:
+                    payload["error"] = msg
+                    payload["message"] = msg
+                return self._json(200 if ok else 500, payload)
+
+            if t == "control":
+                action = data.get("action")
+                handler = CONTROL_ACTIONS.get(action)
+                if not handler:
                     return self._json(
-                        400, {"status": "error", "error": "unknown action"}
+                        400, {"status": "error", "error": f"unknown action: {action}"}
                     )
-                return self._json(
-                    200 if ok else 500,
-                    {"status": "ok" if ok else "error", "message": msg},
-                )
-            else:
-                return self._json(400, {"status": "error", "error": "unknown type"})
+                ok, msg = handler()
+                payload = {"status": "ok" if ok else "error"}
+                if ok:
+                    payload["message"] = msg
+                else:
+                    payload["error"] = msg
+                    payload["message"] = msg
+                return self._json(200 if ok else 500, payload)
+
+            return self._json(400, {"status": "error", "error": f"unknown type: {t}"})
         except Exception as e:
             return self._json(500, {"status": "error", "error": str(e)})
 
