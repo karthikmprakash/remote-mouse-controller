@@ -42,6 +42,39 @@ APP_ALIASES = {
     "system preferences": "System Settings",
 }
 
+def get_screen_size():
+    """Return main display size in pixels (width, height)."""
+    try:
+        import Quartz  # type: ignore
+
+        bounds = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID())
+        w = int(bounds.size.width)
+        h = int(bounds.size.height)
+        if w > 0 and h > 0:
+            return w, h
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(
+            [
+                "osascript",
+                "-e",
+                'tell application "Finder" to get bounds of window of desktop',
+            ],
+            text=True,
+            timeout=2,
+        ).strip()
+        parts = [int(p.strip()) for p in out.split(",")]
+        if len(parts) == 4:
+            w = parts[2] - parts[0]
+            h = parts[3] - parts[1]
+            if w > 0 and h > 0:
+                return w, h
+    except Exception:
+        pass
+    return 1440, 900
+
+
 class MovementWorker:
     """Ordered mouse command worker with movement coalescing.
 
@@ -53,6 +86,7 @@ class MovementWorker:
     def __init__(self):
         self._condition = threading.Condition()
         self._commands = deque()
+        self._screen = get_screen_size()
         threading.Thread(target=self._run, daemon=True).start()
 
     def add(self, dx: float, dy: float) -> None:
@@ -62,6 +96,16 @@ class MovementWorker:
                 self._commands[-1] = ("move", queued_dx + dx, queued_dy + dy)
             else:
                 self._commands.append(("move", dx, dy))
+            self._condition.notify()
+
+    def set_abs(self, nx: float, ny: float) -> None:
+        """Queue an absolute cursor position. nx/ny are normalized 0..1."""
+        with self._condition:
+            # Absolute samples are not additive — keep only the newest.
+            if self._commands and self._commands[-1][0] == "abs":
+                self._commands[-1] = ("abs", nx, ny)
+            else:
+                self._commands.append(("abs", nx, ny))
             self._condition.notify()
 
     def button(self, action: str, button, count: int = 1) -> None:
@@ -81,6 +125,12 @@ class MovementWorker:
                 if action == "move":
                     _, dx, dy = command
                     mouse.move(dx * MOVE_MULTIPLIER, dy * MOVE_MULTIPLIER)
+                elif action == "abs":
+                    _, nx, ny = command
+                    w, h = self._screen
+                    x = max(0, min(w - 1, int(nx * (w - 1))))
+                    y = max(0, min(h - 1, int(ny * (h - 1))))
+                    mouse.position = (x, y)
                 elif action == "click":
                     _, button, count = command
                     mouse.click(button, count)
@@ -138,6 +188,13 @@ def parse_binary_message(data):
         dx = int.from_bytes(data[1:3], "little", signed=True) / 100.0
         dy = int.from_bytes(data[3:5], "little", signed=True) / 100.0
         return {"type": "scroll", "dx": dx, "dy": dy}
+    elif msg_type == 6:  # absolute position (normalized 0..1 as uint16 / 10000)
+        nx = int.from_bytes(data[1:3], "little", signed=False) / 10000.0
+        ny = int.from_bytes(data[3:5], "little", signed=False) / 10000.0
+        return {"type": "abs", "nx": nx, "ny": ny}
+    elif msg_type == 7:  # pinch zoom (positive dy = zoom in)
+        dy = int.from_bytes(data[3:5], "little", signed=True) / 100.0
+        return {"type": "zoom", "dy": dy}
     return None
 
 
@@ -169,6 +226,11 @@ async def handle_ws(websocket):
             if msg_type == "move":
                 movement.add(float(data.get("dx", 0)), float(data.get("dy", 0)))
 
+            elif msg_type == "abs":
+                nx = max(0.0, min(1.0, float(data.get("nx", 0.5))))
+                ny = max(0.0, min(1.0, float(data.get("ny", 0.5))))
+                movement.set_abs(nx, ny)
+
             elif msg_type == "click":
                 button_name = data.get("button", "left").lower()
                 count = int(data.get("count", 1))
@@ -190,6 +252,23 @@ async def handle_ws(websocket):
                 dy = float(data.get("dy", 0))
                 try:
                     mouse.scroll(dx * SCROLL_MULTIPLIER, dy * SCROLL_MULTIPLIER)
+                except Exception:
+                    pass
+
+            elif msg_type == "zoom":
+                # macOS-style pinch: Command + scroll wheel
+                dy = float(data.get("dy", 0))
+                if abs(dy) < 1e-6:
+                    continue
+                try:
+                    if keyboard is not None and Key is not None:
+                        keyboard.press(Key.cmd)
+                        try:
+                            mouse.scroll(0, dy * SCROLL_MULTIPLIER)
+                        finally:
+                            keyboard.release(Key.cmd)
+                    else:
+                        mouse.scroll(0, dy * SCROLL_MULTIPLIER)
                 except Exception:
                     pass
 

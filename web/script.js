@@ -5,7 +5,10 @@
 
   const LONG_PRESS_MS = 350;
   const TAP_MOVE_SLOP = 12;
-  const TAP_MAX_MS = 220;
+  const TAP_MAX_MS = 280;
+  const PINCH_SLOP = 14;
+  const TWO_FINGER_MOVE_SLOP = 14;
+  const ZOOM_SCALE = 0.045;
   let pointerMode = 'trackpad';
 
   ui.wireModal?.({
@@ -159,7 +162,7 @@
     const buffer = new ArrayBuffer(5);
     const view = new DataView(buffer);
     view.setUint8(0, type);
-    if (type === 1 || type === 5) {
+    if (type === 1 || type === 5 || type === 7) {
       view.setInt16(1, Math.round(dx * 100), true);
       view.setInt16(3, Math.round(dy * 100), true);
     } else {
@@ -202,6 +205,44 @@
     sendPacket(type, dx, dy, button, count);
   }
 
+  // Absolute cursor (normalized 0..1). Used by gyro pointing mode.
+  let pendingAbs = null;
+  let absRaf = null;
+
+  function flushAbs() {
+    absRaf = null;
+    if (!pendingAbs) return;
+    if (!(ws && ws.readyState === WebSocket.OPEN)) {
+      pendingAbs = null;
+      return;
+    }
+    if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
+      absRaf = requestAnimationFrame(flushAbs);
+      return;
+    }
+
+    pendingDx = 0;
+    pendingDy = 0;
+    if (moveRaf) {
+      cancelAnimationFrame(moveRaf);
+      moveRaf = null;
+    }
+
+    const { nx, ny } = pendingAbs;
+    pendingAbs = null;
+    const buffer = new ArrayBuffer(5);
+    const view = new DataView(buffer);
+    view.setUint8(0, 6);
+    view.setUint16(1, Math.round(Math.max(0, Math.min(1, nx)) * 10000), true);
+    view.setUint16(3, Math.round(Math.max(0, Math.min(1, ny)) * 10000), true);
+    ws.send(buffer);
+  }
+
+  function sendAbs(nx, ny) {
+    pendingAbs = { nx, ny };
+    if (!absRaf) absRaf = requestAnimationFrame(flushAbs);
+  }
+
   // Send immediately on a healthy socket. Only fall back to frame-coalescing
   // when a packet is already buffered, preserving low latency without floods.
   function sendMove(dx, dy) {
@@ -225,9 +266,46 @@
   let touchStartTime = 0;
   let totalMove = 0;
   let isTwoFinger = false;
+  let twoFingerSession = false;
+  let twoFingerMode = null; // null | 'pending' | 'scroll' | 'pinch'
+  let twoFingerMoved = false;
+  let lastPinchDist = 0;
+  let lastCentroidX = 0;
+  let lastCentroidY = 0;
   let isDragging = false;
   let longPressTimer = null;
   let longPressRaf = null;
+
+  function touchDistance(a, b) {
+    const dx = a.clientX - b.clientX;
+    const dy = a.clientY - b.clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function touchCentroid(a, b) {
+    return {
+      x: (a.clientX + b.clientX) * 0.5,
+      y: (a.clientY + b.clientY) * 0.5,
+    };
+  }
+
+  function beginTwoFinger(touches) {
+    const a = touches[0];
+    const b = touches[1];
+    const mid = touchCentroid(a, b);
+    isTwoFinger = true;
+    twoFingerSession = true;
+    twoFingerMode = 'pending';
+    twoFingerMoved = false;
+    lastPinchDist = touchDistance(a, b);
+    lastCentroidX = mid.x;
+    lastCentroidY = mid.y;
+    lastX = mid.x;
+    lastY = mid.y;
+    touchStartTime = performance.now();
+    clearLongPress();
+    if (isDragging) endDrag();
+  }
 
   function setDragging(active) {
     isDragging = active;
@@ -296,18 +374,22 @@
     e.preventDefault();
     ui.unlockAudio?.(); // unlock iOS audio for the long-press tick
     hideHint();
+
+    if (e.touches.length >= 2) {
+      beginTwoFinger(e.touches);
+      schedulePaint(lastX, lastY, { dragging: false, progress: 0 });
+      return;
+    }
+
     const t = e.touches[0];
-    isTwoFinger = e.touches.length >= 2;
+    isTwoFinger = false;
+    twoFingerSession = false;
+    twoFingerMode = null;
+    twoFingerMoved = false;
     lastX = t.clientX;
     lastY = t.clientY;
     touchStartTime = performance.now();
     totalMove = 0;
-
-    if (isTwoFinger) {
-      clearLongPress();
-      if (isDragging) endDrag();
-      return;
-    }
 
     armLongPress();
     schedulePaint(lastX, lastY, { dragging: isDragging, progress: 0 });
@@ -316,6 +398,50 @@
   function onTouchMove(e) {
     if (pointerMode !== 'trackpad') return;
     e.preventDefault();
+
+    if (e.touches.length >= 2) {
+      if (!twoFingerSession) beginTwoFinger(e.touches);
+      const a = e.touches[0];
+      const b = e.touches[1];
+      const mid = touchCentroid(a, b);
+      const dist = touchDistance(a, b);
+      const dPinch = dist - lastPinchDist;
+      const dx = mid.x - lastCentroidX;
+      const dy = mid.y - lastCentroidY;
+      lastPinchDist = dist;
+      lastCentroidX = mid.x;
+      lastCentroidY = mid.y;
+      lastX = mid.x;
+      lastY = mid.y;
+
+      const pinchMag = Math.abs(dPinch);
+      const moveMag = Math.abs(dx) + Math.abs(dy);
+
+      if (twoFingerMode === 'pending') {
+        if (pinchMag >= PINCH_SLOP && pinchMag >= moveMag) {
+          twoFingerMode = 'pinch';
+          twoFingerMoved = true;
+        } else if (moveMag >= TWO_FINGER_MOVE_SLOP) {
+          twoFingerMode = 'scroll';
+          twoFingerMoved = true;
+        }
+      }
+
+      if (twoFingerMode === 'pinch') {
+        if (Math.abs(dPinch) > 0.2) {
+          // Positive distance change = zoom in
+          sendBinary(7, 0, dPinch * ZOOM_SCALE);
+        }
+      } else if (twoFingerMode === 'scroll') {
+        if (dy !== 0 || dx !== 0) {
+          sendBinary(5, dx, dy);
+        }
+      }
+
+      schedulePaint(lastX, lastY, { dragging: false, progress: 0 });
+      return;
+    }
+
     const t = e.touches[0];
     const dx = t.clientX - lastX;
     const dy = t.clientY - lastY;
@@ -323,18 +449,19 @@
     lastY = t.clientY;
     totalMove += Math.abs(dx) + Math.abs(dy);
 
-    if (e.touches.length >= 2 || isTwoFinger) {
+    if (twoFingerSession) {
+      // One finger remaining after a two-finger gesture — don't move cursor yet
       clearLongPress();
       if (isDragging) endDrag();
-      isTwoFinger = true;
-      sendBinary(5, 0, dy);
-    } else {
-      if (!isDragging && totalMove >= TAP_MOVE_SLOP) {
-        clearLongPress();
-      }
-      // Network first, paint second — cursor latency matters most
-      sendMove(dx, dy);
+      schedulePaint(lastX, lastY, { dragging: false, progress: 0 });
+      return;
     }
+
+    if (!isDragging && totalMove >= TAP_MOVE_SLOP) {
+      clearLongPress();
+    }
+    // Network first, paint second — cursor latency matters most
+    sendMove(dx, dy);
     schedulePaint(lastX, lastY, {
       dragging: isDragging,
       progress: isDragging ? 1 : 0,
@@ -347,10 +474,12 @@
     clearLongPress();
 
     if (e.touches && e.touches.length > 0) {
-      if (e.touches.length === 1) {
-        isTwoFinger = false;
+      if (e.touches.length >= 2) {
+        beginTwoFinger(e.touches);
+      } else if (e.touches.length === 1) {
         lastX = e.touches[0].clientX;
         lastY = e.touches[0].clientY;
+        isTwoFinger = false;
       }
       return;
     }
@@ -359,12 +488,25 @@
 
     if (isDragging) {
       endDrag();
-    } else if (!isTwoFinger && totalMove < TAP_MOVE_SLOP && dt < TAP_MAX_MS) {
+    } else if (twoFingerSession) {
+      if (
+        !twoFingerMoved &&
+        twoFingerMode !== 'scroll' &&
+        twoFingerMode !== 'pinch' &&
+        dt < TAP_MAX_MS
+      ) {
+        sendBinary(2, 0, 0, 2, 1); // right click
+        ui.haptic?.(16, 'strong');
+      }
+    } else if (totalMove < TAP_MOVE_SLOP && dt < TAP_MAX_MS) {
       sendBinary(2, 0, 0, 1, 1);
       ui.haptic?.(12, 'soft');
     }
 
     isTwoFinger = false;
+    twoFingerSession = false;
+    twoFingerMode = null;
+    twoFingerMoved = false;
     clearTouch();
   }
 
@@ -432,16 +574,16 @@
     }
   });
 
-  // ── Gyro / DeviceOrientation mode ───────────────────────────
+  // ── Gyro / DeviceOrientation mode (absolute pointing) ─────
   let gyroActive = false;
   let gyroPaused = false;
   let gyroListening = false;
-  let calBeta = 0;
-  let calGamma = 0;
+  let calBeta = NaN;
+  let calGamma = NaN;
   let lastOrient = null;
-  let gyroSensitivity = 1.6;
-  const GYRO_DEADZONE = 1.2; // degrees
-  const GYRO_MAX_STEP = 48; // px per frame clamp
+  let gyroSensitivity = 1.4;
+  // Degrees from center-aim to screen edge at sensitivity = 1
+  const GYRO_BASE_HALF_FOV = 32;
 
   const modeLabel = document.getElementById('mode-label');
   const modeTrackpadBtn = document.getElementById('mode-trackpad');
@@ -460,8 +602,8 @@
     sub: 'Your phone is the trackpad for your Mac',
   };
   const GYRO_HINT = {
-    title: 'Tilt to move',
-    sub: 'Hold the phone and tilt — use the buttons below to click',
+    title: 'Point to aim',
+    sub: 'Aim the phone like a remote — Recenter maps this direction to screen center',
   };
 
   function isSecureEnoughForSensors() {
@@ -487,6 +629,10 @@
     }
   }
 
+  function clamp01(v) {
+    return Math.max(0, Math.min(1, v));
+  }
+
   function recenterGyro(sample) {
     if (sample && Number.isFinite(sample.beta) && Number.isFinite(sample.gamma)) {
       calBeta = sample.beta;
@@ -495,14 +641,16 @@
       calBeta = lastOrient.beta;
       calGamma = lastOrient.gamma;
     }
-    ui.showToast?.('Gyro recentered', 'ok');
+    sendAbs(0.5, 0.5);
+    paintGyroCursor(0.5, 0.5);
+    ui.showToast?.('Aim centered', 'ok');
     ui.haptic?.(16, 'soft');
   }
 
   function paintGyroCursor(nx, ny) {
-    // nx/ny are normalized tilt offsets roughly -1..1
-    const x = window.innerWidth * 0.5 + nx * window.innerWidth * 0.28;
-    const y = window.innerHeight * 0.45 + ny * window.innerHeight * 0.22;
+    // Preview aim on the phone: keep the dot in the open field above controls
+    const x = window.innerWidth * clamp01(nx);
+    const y = window.innerHeight * (0.28 + clamp01(ny) * 0.32);
     schedulePaint(x, y, { dragging: isDragging, progress: isDragging ? 1 : 0 });
   }
 
@@ -514,33 +662,26 @@
     const gamma = e.gamma;
     lastOrient = { beta, gamma };
 
-    // First sample after enable → calibrate
-    if (calBeta === null || calGamma === null || Number.isNaN(calBeta)) {
+    // First sample after enable → this direction becomes screen center
+    if (!Number.isFinite(calBeta) || !Number.isFinite(calGamma)) {
       calBeta = beta;
       calGamma = gamma;
+      sendAbs(0.5, 0.5);
+      paintGyroCursor(0.5, 0.5);
+      return;
     }
 
-    let dGamma = gamma - calGamma;
-    let dBeta = beta - calBeta;
+    const halfFov = GYRO_BASE_HALF_FOV / Math.max(0.5, gyroSensitivity);
+    const dGamma = gamma - calGamma;
+    const dBeta = beta - calBeta;
 
-    // Deadzone so resting hand doesn't drift
-    if (Math.abs(dGamma) < GYRO_DEADZONE) dGamma = 0;
-    if (Math.abs(dBeta) < GYRO_DEADZONE) dBeta = 0;
+    // Absolute map: phone direction → Mac screen position
+    // gamma = yaw-ish left/right; beta = pitch (invert so tip-up → cursor up)
+    const nx = clamp01(0.5 + (dGamma / halfFov) * 0.5);
+    const ny = clamp01(0.5 - (dBeta / halfFov) * 0.5);
 
-    // gamma = left/right tilt → dx; beta = forward/back → dy
-    let dx = dGamma * gyroSensitivity;
-    let dy = dBeta * gyroSensitivity;
-    dx = Math.max(-GYRO_MAX_STEP, Math.min(GYRO_MAX_STEP, dx));
-    dy = Math.max(-GYRO_MAX_STEP, Math.min(GYRO_MAX_STEP, dy));
-
-    if (dx !== 0 || dy !== 0) {
-      sendMove(dx, dy);
-    }
-
-    paintGyroCursor(
-      Math.max(-1, Math.min(1, dGamma / 30)),
-      Math.max(-1, Math.min(1, dBeta / 30)),
-    );
+    sendAbs(nx, ny);
+    paintGyroCursor(nx, ny);
   }
 
   function startGyroListening() {
@@ -605,7 +746,7 @@
       hintTitle.textContent = GYRO_HINT.title;
       hintSub.textContent = GYRO_HINT.sub;
     }
-    ui.showToast?.('Gyro on — tilt to move', 'ok');
+    ui.showToast?.('Gyro on — point to aim', 'ok');
     ui.haptic?.(18, 'strong');
     return true;
   }
@@ -688,7 +829,7 @@
     if (Number.isFinite(v)) gyroSensitivity = v;
   });
   if (gyroSensInput) {
-    gyroSensitivity = parseFloat(gyroSensInput.value) || 1.6;
+    gyroSensitivity = parseFloat(gyroSensInput.value) || 1.4;
   }
 
   updateModeChrome();
