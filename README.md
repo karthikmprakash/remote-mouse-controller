@@ -24,23 +24,29 @@ Then, on your phone (connected to the same Wi‑Fi), open the URL printed in the
 - One-finger move: moves the cursor
 - One-finger tap: left click
 - Two-finger move: scroll
+- Press & hold, then move: drag / select
 
-### Gyro/Accelerometer Mode
-- Tilt your phone to move the cursor
-- On-screen buttons for:
-  - **Left Click**: Single left mouse click
-  - **Right Click**: Single right mouse click
-  - **Recenter**: Reset the gyro calibration point
-  - **Drag**: Toggle drag mode (hold left mouse button)
-- Adjustable sensitivity slider
-- Automatic sensor detection and permission handling
+### Gyro Mode
+Uses the phone’s real-time gyroscope / orientation sensors (`DeviceOrientationEvent`):
+- Toggle **Gyro** in the top bar
+- Tilt the phone to move the Mac cursor
+- On-screen **Left / Right / Drag / Recenter** buttons
+- Sensitivity slider
+- **iPhone note:** Safari only grants motion permission on **HTTPS**. The server auto-creates a self-signed cert and serves `https://YOUR_IP:8000` — accept the certificate warning once.
+
+### Controls Page (`/apps.html`)
+- Launch common Mac apps (VS Code, Safari, Spotify, etc.)
+- Volume, mute, and system-wide media play/pause/next/prev (works with Spotify, Music, browser media)
+- System actions: Spotlight, Mission Control, Show Desktop, Screenshot, Dark Mode, Sleep Display, Lock, Quit frontmost app
+- Edit shortcuts: Copy, Paste, Undo, Select All
+- Open a local URL (e.g. `localhost:3000`)
 
 ## Features
-- **Mode Toggle**: Switch between trackpad and gyro modes
-- **Sensor Support**: Uses gyroscope and accelerometer when available
-- **Sensitivity Control**: Adjust gyro sensitivity in real-time
-- **Drag Mode**: Toggle continuous left-click holding for dragging
-- **Recenter**: Reset gyro calibration when needed
+- **Pad / Gyro toggle**: switch pointer modes live on the trackpad page
+- **Real-time sensors**: Device Orientation API at display refresh rate
+- **System Media Keys**: Playback buttons use macOS media keys (not Apple Music only)
+- **Honest Feedback**: Failed launches/commands show an error toast instead of a false success
+- **Drag Mode**: Press & hold on the trackpad, or toggle Drag in gyro mode
 - **Responsive Design**: Works on phones and tablets
 
 ## Performance Optimizations
@@ -69,5 +75,6 @@ If it still does not move, quit and reopen the terminal, then rerun the server.
 - If movement feels slow/fast, tweak `MOVE_MULTIPLIER` in `server/server.py`.
 - For scroll sensitivity, tweak `SCROLL_MULTIPLIER`.
 - If gyro mode doesn't work, check if your browser supports the Device Orientation API and grant sensor permissions.
-- Some browsers require HTTPS for sensor access - in that case, use trackpad mode or try a different browser.
+- **iPhone gyro:** use the `https://` URL from the server terminal (HTTP cannot access motion sensors). Accept the self-signed certificate warning.
+- Some older Android browsers allow gyro over HTTP; iOS always needs HTTPS.
 - For best performance, ensure your phone and Mac are on the same WiFi network with good signal strength.

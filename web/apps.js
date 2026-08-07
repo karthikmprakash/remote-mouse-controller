@@ -29,20 +29,28 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!res.ok || data.status !== 'ok') {
-        throw new Error(data.error || 'Command failed');
+      let data = {};
+      try {
+        data = await res.json();
+      } catch (_) {
+        throw new Error(res.ok ? 'Invalid server response' : `HTTP ${res.status}`);
       }
-      const msg = data.message || 'Done';
+      if (!res.ok || data.status !== 'ok') {
+        throw new Error(data.error || data.message || 'Command failed');
+      }
+      const msg = data.message && data.message !== 'ok' ? data.message : 'Done';
       ui.showToast?.(msg, 'ok');
       ui.haptic?.(14);
       if (btn) flashTile(btn, 'ok');
+      setStatus('Connected', 'green');
     } catch (e) {
       ui.showToast?.(e.message || 'Command failed', 'err', 2800);
       ui.haptic?.([20, 40, 20]);
       if (btn) flashTile(btn, 'err');
-      setStatus('Error', 'red');
-      setTimeout(() => setStatus('Connected', 'green'), 2500);
+      // Network failures mean we're disconnected; command errors do not.
+      if (e instanceof TypeError) {
+        setStatus('Disconnected', 'red');
+      }
     } finally {
       if (btn) btn.classList.remove('is-loading', 'is-pressed');
     }
@@ -53,11 +61,18 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'ping' }),
-    }).then(() => {
-      setStatus('Connected', 'green');
-    }).catch(() => {
-      setStatus('Disconnected', 'red');
-    });
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.status === 'ok') {
+          setStatus('Connected', 'green');
+        } else {
+          setStatus('Disconnected', 'red');
+        }
+      })
+      .catch(() => {
+        setStatus('Disconnected', 'red');
+      });
   }
 
   setStatus('Connecting…', 'yellow');
@@ -66,7 +81,7 @@
 
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.tile');
-    if (!btn) return;
+    if (!btn || btn.disabled) return;
     const type = btn.dataset.type;
     ui.haptic?.(8);
 

@@ -185,6 +185,7 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 /* Connection chip */
@@ -310,9 +311,9 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-width: 96px;
+  min-width: 72px;
   min-height: 52px;
-  padding: 8px 14px;
+  padding: 8px 10px;
   border-radius: var(--radius-md);
   color: var(--fg-secondary);
   font-size: 11px;
@@ -338,6 +339,228 @@ a { color: inherit; text-decoration: none; }
 .dock-link.is-active {
   color: var(--fg-inverse);
   background: var(--accent);
+}
+
+/* ── Mode toggle (Pad / Gyro) ──────────────────────────────── */
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border);
+}
+
+.mode-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-radius: 7px;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.mode-btn.is-active {
+  background: var(--accent);
+  color: var(--fg-inverse);
+}
+
+.mode-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Gyro control panel ────────────────────────────────────── */
+.gyro-panel {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--safe-bottom) + var(--dock-h) + var(--space-4));
+  z-index: 900;
+  width: min(92vw, 360px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: var(--shadow-md);
+}
+
+.gyro-panel.hidden {
+  display: none;
+}
+
+.gyro-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.gyro-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.gyro-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-surface-solid);
+  color: var(--fg-primary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 12px 8px;
+  border-radius: var(--radius-sm);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+
+.gyro-btn:active {
+  transform: scale(0.97);
+  background: var(--bg-interactive-active);
+}
+
+.gyro-btn.is-active {
+  border-color: var(--warm);
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--warm);
+}
+
+.gyro-btn--accent {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
+.gyro-btn--wide {
+  width: 100%;
+  padding: 11px 12px;
+}
+
+.gyro-sens {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-secondary);
+}
+
+.gyro-sens span {
+  flex: 0 0 auto;
+  min-width: 48px;
+}
+
+.gyro-sens input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 28px;
+}
+
+body.is-gyro #pad {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(45, 212, 191, 0.07) 0%, transparent 40%),
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    radial-gradient(1200px 800px at 50% 50%, #101816 0%, var(--bg-base) 72%);
+  background-size: auto, 28px 28px, 28px 28px, auto;
+}
+
+body.is-gyro .pad-hint-gestures {
+  display: none;
+}
+
+body.is-gyro .pad-hint {
+  top: 38%;
+}
+
+body.is-gyro .aim-reticle {
+  display: grid;
+}
+
+.aim-reticle {
+  display: none;
+  position: relative;
+  width: 72px;
+  height: 72px;
+  margin: var(--space-5) auto 0;
+  place-items: center;
+}
+
+.aim-ring {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(45, 212, 191, 0.45);
+  box-shadow: 0 0 0 6px rgba(45, 212, 191, 0.06);
+}
+
+.aim-cross-h,
+.aim-cross-v {
+  position: absolute;
+  background: rgba(45, 212, 191, 0.7);
+  border-radius: 1px;
+}
+
+.aim-cross-h {
+  width: 18px;
+  height: 2px;
+}
+
+.aim-cross-v {
+  width: 2px;
+  height: 18px;
+}
+
+@media (max-width: 420px) {
+  .brand-text {
+    display: none;
+  }
+
+  .app-chrome {
+    gap: var(--space-2);
+    padding: var(--space-2);
+  }
+
+  .chrome-actions {
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  #connection-status,
+  .connection-status {
+    padding: 6px;
+    max-width: none;
+  }
+
+  #status-text,
+  .status-text {
+    display: none;
+  }
+
+  .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .mode-btn {
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 380px) {
+  .gyro-actions {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 /* ── Trackpad hint ─────────────────────────────────────────── */
@@ -576,6 +799,16 @@ a { color: inherit; text-decoration: none; }
   gap: var(--space-3);
 }
 
+.media-row.edit-row {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+@media (max-width: 380px) {
+  .media-row.edit-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 .media-row .tile {
   align-items: center;
   min-height: 76px;
@@ -590,6 +823,60 @@ a { color: inherit; text-decoration: none; }
   width: 100%;
   text-align: center;
   font-size: 12px;
+}
+
+/* ── Presentation page ─────────────────────────────────────── */
+.pres-nav {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.pres-btn {
+  min-height: 120px;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+}
+
+.pres-btn .tile-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto;
+  border-radius: 16px;
+}
+
+.pres-btn .tile-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.pres-btn .tile-label {
+  width: 100%;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pres-btn--primary {
+  border-color: var(--border-strong);
+  background: linear-gradient(180deg, rgba(45, 212, 191, 0.16), rgba(45, 212, 191, 0.06));
+}
+
+.pres-btn--primary .tile-icon {
+  background: var(--accent);
+  color: var(--fg-inverse);
+  border-color: transparent;
+}
+
+.pres-secondary {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+body.is-present .page-intro h1 {
+  letter-spacing: -0.04em;
 }
 
 /* ── Toast ─────────────────────────────────────────────────── */
