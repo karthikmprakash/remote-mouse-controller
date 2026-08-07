@@ -121,8 +121,9 @@
   }
 
   function wsUrl() {
+    // Same origin as the page (port 8000 /ws) so the phone cert trust covers WSS.
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${proto}://${window.location.hostname}:8765`;
+    return `${proto}://${window.location.host}/ws`;
   }
 
   let ws;

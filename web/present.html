@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Remote Mouse" />
+  <meta name="theme-color" content="#0a0f0e" />
+  <title>Present — Remote Mouse</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="stylesheet" href="/styles.css?v=12" />
+</head>
+<body class="is-controls is-present">
+  <header class="app-chrome" id="status-bar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+          <rect x="3" y="4" width="18" height="12" rx="2"/>
+          <path d="M8 20h8"/>
+          <path d="M12 16v4"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">Remote Mouse</span>
+        <span class="brand-sub">Present</span>
+      </div>
+    </div>
+
+    <div class="chrome-actions">
+      <div id="connection-status" class="connection-status" aria-live="polite">
+        <div id="status-indicator" class="status-red" aria-hidden="true"></div>
+        <span id="status-text">Connecting…</span>
+      </div>
+      <button id="fullscreen-btn" class="icon-btn" type="button" aria-label="Fullscreen or install app">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true">
+          <polyline points="4 9 4 4 9 4"/>
+          <polyline points="20 9 20 4 15 4"/>
+          <polyline points="4 15 4 20 9 20"/>
+          <polyline points="20 15 20 20 15 20"/>
+        </svg>
+      </button>
+      <button id="info-btn" class="icon-btn info-btn" type="button" aria-label="Presentation help">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/>
+          <line x1="12" y1="11" x2="12" y2="16"/>
+          <circle cx="12" cy="8" r="0.8" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="page-intro">
+      <h1>Present</h1>
+      <p>Slide remote for Keynote, PowerPoint, and Google Slides.</p>
+    </div>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Navigate</h2>
+        <span>Slides</span>
+      </div>
+      <div class="pres-nav">
+        <button class="tile pres-btn" type="button" data-type="control" data-action="present_prev">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="15 18 9 12 15 6"/></svg>
+          </span>
+          <span class="tile-label">Previous</span>
+        </button>
+        <button class="tile pres-btn pres-btn--primary" type="button" data-type="control" data-action="present_next">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="9 18 15 12 9 6"/></svg>
+          </span>
+          <span class="tile-label">Next</span>
+        </button>
+      </div>
+      <div class="media-row pres-secondary">
+        <button class="tile" type="button" data-type="control" data-action="present_space">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18"><rect x="4" y="9" width="16" height="6" rx="1.5"/></svg>
+          </span>
+          <span class="tile-label">Space</span>
+        </button>
+        <button class="tile" type="button" data-type="control" data-action="present_first">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
+          </span>
+          <span class="tile-label">First</span>
+        </button>
+        <button class="tile" type="button" data-type="control" data-action="present_last">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
+          </span>
+          <span class="tile-label">Last</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Slideshow</h2>
+        <span>Play</span>
+      </div>
+      <div class="media-row">
+        <button class="tile tile--warm" type="button" data-type="control" data-action="present_start">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+          </span>
+          <span class="tile-label">From start</span>
+        </button>
+        <button class="tile" type="button" data-type="control" data-action="present_from_current">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18"><polygon points="8 6 18 12 8 18 8 6"/><line x1="5" y1="6" x2="5" y2="18"/></svg>
+          </span>
+          <span class="tile-label">Current</span>
+        </button>
+        <button class="tile tile--danger" type="button" data-type="control" data-action="present_exit">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+          </span>
+          <span class="tile-label">Exit</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Screen</h2>
+        <span>Blank</span>
+      </div>
+      <div class="media-row">
+        <button class="tile" type="button" data-type="control" data-action="present_black">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="18" height="18"><rect x="3" y="5" width="18" height="14" rx="2" fill="currentColor" opacity="0.35"/><rect x="3" y="5" width="18" height="14" rx="2"/></svg>
+          </span>
+          <span class="tile-label">Black (B)</span>
+        </button>
+        <button class="tile" type="button" data-type="control" data-action="present_white">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="18" height="18"><rect x="3" y="5" width="18" height="14" rx="2"/></svg>
+          </span>
+          <span class="tile-label">White (W)</span>
+        </button>
+        <button class="tile" type="button" data-type="control" data-action="mute_toggle">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+          </span>
+          <span class="tile-label">Mute</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Open app</h2>
+        <span>Launch</span>
+      </div>
+      <div class="grid apps-grid">
+        <button class="tile" type="button" data-type="launch" data-app="Keynote">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/></svg>
+          </span>
+          <span class="tile-label">Keynote</span>
+        </button>
+        <button class="tile" type="button" data-type="launch" data-app="Microsoft PowerPoint">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h5a3 3 0 0 1 0 6H8z"/><path d="M8 14v4"/></svg>
+          </span>
+          <span class="tile-label">PowerPoint</span>
+        </button>
+        <button class="tile" type="button" data-type="open_url" data-url="https://docs.google.com/presentation/">
+          <span class="tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18"/><path d="M8 5v4"/></svg>
+          </span>
+          <span class="tile-label">Slides</span>
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <nav class="dock" aria-label="Primary">
+    <a class="dock-link" href="/index.html">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true">
+        <rect x="6" y="3" width="12" height="18" rx="6"/>
+        <line x1="12" y1="3" x2="12" y2="11"/>
+      </svg>
+      Trackpad
+    </a>
+    <a class="dock-link is-active" href="/present.html" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="12" rx="2"/>
+        <path d="M8 20h8"/>
+        <path d="M12 16v4"/>
+      </svg>
+      Present
+    </a>
+    <a class="dock-link" href="/apps.html">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true">
+        <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+        <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+      </svg>
+      Controls
+    </a>
+  </nav>
+
+  <div id="info-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="help-title" aria-hidden="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="help-title">Present help</h3>
+        <button id="close-modal" class="close-btn" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="18" height="18" aria-hidden="true">
+            <line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <h4>Works with</h4>
+        <ul class="help-list">
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14"><rect x="3" y="4" width="18" height="12" rx="2"/></svg>
+            </span>
+            <span><strong>Keynote</strong> & <strong>PowerPoint</strong> — play, next/prev, B/W, Esc</span>
+          </li>
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14"><rect x="3" y="5" width="18" height="14" rx="2"/></svg>
+            </span>
+            <span><strong>Google Slides</strong> — same once the slideshow is focused in the browser</span>
+          </li>
+        </ul>
+        <h4>Tip</h4>
+        <ul class="help-list">
+          <li>
+            <span class="help-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14"><path d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7z"/></svg>
+            </span>
+            <span>Start the deck on the Mac first, then use <strong>Next</strong> / <strong>Previous</strong> from your phone.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="/ui.js?v=12"></script>
+  <script src="/apps.js?v=12"></script>
+</body>
+</html>

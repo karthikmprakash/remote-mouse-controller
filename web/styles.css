@@ -311,9 +311,9 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-width: 96px;
+  min-width: 72px;
   min-height: 52px;
-  padding: 8px 14px;
+  padding: 8px 10px;
   border-radius: var(--radius-md);
   color: var(--fg-secondary);
   font-size: 11px;
@@ -823,6 +823,60 @@ body.is-gyro .aim-reticle {
   width: 100%;
   text-align: center;
   font-size: 12px;
+}
+
+/* ── Presentation page ─────────────────────────────────────── */
+.pres-nav {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.pres-btn {
+  min-height: 120px;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+}
+
+.pres-btn .tile-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto;
+  border-radius: 16px;
+}
+
+.pres-btn .tile-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.pres-btn .tile-label {
+  width: 100%;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pres-btn--primary {
+  border-color: var(--border-strong);
+  background: linear-gradient(180deg, rgba(45, 212, 191, 0.16), rgba(45, 212, 191, 0.06));
+}
+
+.pres-btn--primary .tile-icon {
+  background: var(--accent);
+  color: var(--fg-inverse);
+  border-color: transparent;
+}
+
+.pres-secondary {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+body.is-present .page-intro h1 {
+  letter-spacing: -0.04em;
 }
 
 /* ── Toast ─────────────────────────────────────────────────── */

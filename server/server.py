@@ -1,14 +1,19 @@
 import asyncio
+import base64
+import hashlib
 import json
+import os
 import shutil
 import socket
 import subprocess
 import sys
 import threading
+import time
+import webbrowser
 from collections import deque
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import websockets
 from pynput.mouse import Button
@@ -23,9 +28,11 @@ except Exception:  # pragma: no cover - platform / permission dependent
 
 # Configuration
 HTTP_PORT = 8000
-WS_PORT = 8765
+WS_PORT = 8765  # legacy separate-port WSS (phones prefer same-origin /ws)
+SETUP_PORT = 17999  # localhost-only Mac pairing UI (no TLS warning)
 MOVE_MULTIPLIER = 1.5  # Increase if movement feels slow
 SCROLL_MULTIPLIER = 1.0  # Positive dy scrolls up in pynput; we'll invert client dy
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 mouse = MouseController()
 keyboard = KeyboardController() if KeyboardController else None
@@ -44,14 +51,26 @@ APP_ALIASES = {
 
 def get_screen_size():
     """Return main display size in pixels (width, height)."""
+    left, top, w, h = get_screen_bounds()
+    return w, h
+
+
+def get_screen_bounds():
+    """Return (left, top, width, height) for the main display in pynput space."""
     try:
         import Quartz  # type: ignore
 
         bounds = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID())
+        # Quartz uses bottom-left origin; pynput exposes top-left global coords.
+        # For the main display this is typically (0, 0, w, h).
         w = int(bounds.size.width)
         h = int(bounds.size.height)
+        left = int(bounds.origin.x)
+        # Convert Quartz bottom-left Y to top-left style used by pynput.
+        # Main display origin.y is usually 0 in global Cocoa mouse coords via pynput.
+        top = 0
         if w > 0 and h > 0:
-            return w, h
+            return left, top, w, h
     except Exception:
         pass
     try:
@@ -66,13 +85,14 @@ def get_screen_size():
         ).strip()
         parts = [int(p.strip()) for p in out.split(",")]
         if len(parts) == 4:
-            w = parts[2] - parts[0]
-            h = parts[3] - parts[1]
+            left, top, right, bottom = parts
+            w = right - left
+            h = bottom - top
             if w > 0 and h > 0:
-                return w, h
+                return left, top, w, h
     except Exception:
         pass
-    return 1440, 900
+    return 0, 0, 1440, 900
 
 
 class MovementWorker:
@@ -86,14 +106,26 @@ class MovementWorker:
     def __init__(self):
         self._condition = threading.Condition()
         self._commands = deque()
-        self._screen = get_screen_size()
+        self._bounds = get_screen_bounds()
         threading.Thread(target=self._run, daemon=True).start()
 
     def add(self, dx: float, dy: float) -> None:
+        # Drop movement that cannot move the cursor (already at a screen edge).
+        # Otherwise those deltas queue up as invisible "debt" you must unwind.
+        dx, dy = self._clip_delta_to_screen(dx, dy)
+        if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+            return
         with self._condition:
             if self._commands and self._commands[-1][0] == "move":
                 _, queued_dx, queued_dy = self._commands[-1]
-                self._commands[-1] = ("move", queued_dx + dx, queued_dy + dy)
+                # Re-clip the coalesced vector against the live cursor position.
+                queued_dx, queued_dy = self._clip_delta_to_screen(
+                    queued_dx + dx, queued_dy + dy
+                )
+                if abs(queued_dx) < 1e-6 and abs(queued_dy) < 1e-6:
+                    self._commands.pop()
+                else:
+                    self._commands[-1] = ("move", queued_dx, queued_dy)
             else:
                 self._commands.append(("move", dx, dy))
             self._condition.notify()
@@ -113,6 +145,50 @@ class MovementWorker:
             self._commands.append((action, button, count))
             self._condition.notify()
 
+    def _clamp_pos(self, x: float, y: float):
+        left, top, w, h = self._bounds
+        nx = max(left, min(left + w - 1, x))
+        ny = max(top, min(top + h - 1, y))
+        return nx, ny
+
+    def _clip_delta_to_screen(self, dx: float, dy: float):
+        """Return only the portion of dx/dy that stays inside the display."""
+        try:
+            x, y = mouse.position
+        except Exception:
+            return dx, dy
+        x, y = self._clamp_pos(float(x), float(y))
+        nx, ny = self._clamp_pos(
+            x + dx * MOVE_MULTIPLIER,
+            y + dy * MOVE_MULTIPLIER,
+        )
+        return (nx - x) / MOVE_MULTIPLIER, (ny - y) / MOVE_MULTIPLIER
+
+    def _apply_relative(self, dx: float, dy: float) -> None:
+        """Apply relative motion without allowing off-screen 'virtual' overshoot.
+
+        Reading the live position and clamping means reversing off a screen edge
+        moves immediately — you don't have to unwind invisible overshoot.
+        """
+        dx, dy = self._clip_delta_to_screen(dx, dy)
+        if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+            return
+        try:
+            x, y = mouse.position
+        except Exception:
+            return
+        x, y = self._clamp_pos(float(x), float(y))
+        mouse.position = (
+            x + dx * MOVE_MULTIPLIER,
+            y + dy * MOVE_MULTIPLIER,
+        )
+
+    def _apply_abs(self, nx: float, ny: float) -> None:
+        left, top, w, h = self._bounds
+        x = left + max(0.0, min(1.0, nx)) * (w - 1)
+        y = top + max(0.0, min(1.0, ny)) * (h - 1)
+        mouse.position = (x, y)
+
     def _run(self) -> None:
         while True:
             with self._condition:
@@ -124,13 +200,10 @@ class MovementWorker:
                 action = command[0]
                 if action == "move":
                     _, dx, dy = command
-                    mouse.move(dx * MOVE_MULTIPLIER, dy * MOVE_MULTIPLIER)
+                    self._apply_relative(dx, dy)
                 elif action == "abs":
                     _, nx, ny = command
-                    w, h = self._screen
-                    x = max(0, min(w - 1, int(nx * (w - 1))))
-                    y = max(0, min(h - 1, int(ny * (h - 1))))
-                    mouse.position = (x, y)
+                    self._apply_abs(nx, ny)
                 elif action == "click":
                     _, button, count = command
                     mouse.click(button, count)
@@ -152,6 +225,85 @@ def get_lan_ip() -> str:
             return s.getsockname()[0]
     except Exception:
         return "127.0.0.1"
+
+
+def is_accessibility_trusted():
+    """Return True/False on macOS when detectable, else None."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        import ctypes
+
+        lib = ctypes.cdll.LoadLibrary(
+            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+        )
+        lib.AXIsProcessTrusted.restype = ctypes.c_bool
+        return bool(lib.AXIsProcessTrusted())
+    except Exception:
+        return None
+
+
+def open_accessibility_settings():
+    if sys.platform != "darwin":
+        return False, "Accessibility settings are only available on macOS"
+    urls = [
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility",
+    ]
+    for url in urls:
+        try:
+            result = subprocess.run(
+                ["open", url],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                return True, "Opened Accessibility settings"
+        except Exception:
+            continue
+    try:
+        subprocess.run(
+            ["open", "/System/Library/PreferencePanes/Security.prefPane"],
+            check=False,
+            timeout=5,
+        )
+        return True, "Opened Privacy & Security settings"
+    except Exception as e:
+        return False, str(e)
+
+
+# Set in main() once TLS is known
+ACTIVE_SCHEME = "http"
+
+
+def phone_base_url(scheme=None):
+    ip = get_lan_ip()
+    use_scheme = scheme or ACTIVE_SCHEME
+    return f"{use_scheme}://{ip}:{HTTP_PORT}"
+
+
+def build_qr_svg(data: str) -> bytes:
+    import qrcode
+    import qrcode.image.svg
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=2,
+        image_factory=qrcode.image.svg.SvgPathImage,
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image()
+    raw = img.to_string(encoding="unicode")
+    # Force scalable SVG for the setup card
+    if "<svg" in raw and "width=" in raw:
+        raw = raw.replace('width="', 'width="100%" data-w="', 1)
+        raw = raw.replace('height="', 'height="100%" data-h="', 1)
+    return raw.encode("utf-8")
 
 
 def get_web_dir() -> Path:
@@ -198,6 +350,63 @@ def parse_binary_message(data):
     return None
 
 
+def dispatch_pointer_message(data: dict) -> None:
+    """Apply a decoded pointer/control message (binary protocol or JSON)."""
+    if not data:
+        return
+
+    msg_type = data.get("type")
+
+    if msg_type == "move":
+        movement.add(float(data.get("dx", 0)), float(data.get("dy", 0)))
+
+    elif msg_type == "abs":
+        nx = max(0.0, min(1.0, float(data.get("nx", 0.5))))
+        ny = max(0.0, min(1.0, float(data.get("ny", 0.5))))
+        movement.set_abs(nx, ny)
+
+    elif msg_type == "click":
+        button_name = data.get("button", "left").lower()
+        count = int(data.get("count", 1))
+        button = Button.left if button_name == "left" else Button.right
+        movement.button("click", button, count)
+
+    elif msg_type == "down":
+        button_name = data.get("button", "left").lower()
+        button = Button.left if button_name == "left" else Button.right
+        movement.button("down", button)
+
+    elif msg_type == "up":
+        button_name = data.get("button", "left").lower()
+        button = Button.left if button_name == "left" else Button.right
+        movement.button("up", button)
+
+    elif msg_type == "scroll":
+        dx = float(data.get("dx", 0))
+        dy = float(data.get("dy", 0))
+        try:
+            mouse.scroll(dx * SCROLL_MULTIPLIER, dy * SCROLL_MULTIPLIER)
+        except Exception:
+            pass
+
+    elif msg_type == "zoom":
+        # macOS-style pinch: Command + scroll wheel
+        dy = float(data.get("dy", 0))
+        if abs(dy) < 1e-6:
+            return
+        try:
+            if keyboard is not None and Key is not None:
+                keyboard.press(Key.cmd)
+                try:
+                    mouse.scroll(0, dy * SCROLL_MULTIPLIER)
+                finally:
+                    keyboard.release(Key.cmd)
+            else:
+                mouse.scroll(0, dy * SCROLL_MULTIPLIER)
+        except Exception:
+            pass
+
+
 async def handle_ws(websocket):
     # Optimize WebSocket for low latency
     try:
@@ -218,60 +427,7 @@ async def handle_ws(websocket):
             else:
                 data = json.loads(message)
 
-            if not data:
-                continue
-
-            msg_type = data.get("type")
-
-            if msg_type == "move":
-                movement.add(float(data.get("dx", 0)), float(data.get("dy", 0)))
-
-            elif msg_type == "abs":
-                nx = max(0.0, min(1.0, float(data.get("nx", 0.5))))
-                ny = max(0.0, min(1.0, float(data.get("ny", 0.5))))
-                movement.set_abs(nx, ny)
-
-            elif msg_type == "click":
-                button_name = data.get("button", "left").lower()
-                count = int(data.get("count", 1))
-                button = Button.left if button_name == "left" else Button.right
-                movement.button("click", button, count)
-
-            elif msg_type == "down":
-                button_name = data.get("button", "left").lower()
-                button = Button.left if button_name == "left" else Button.right
-                movement.button("down", button)
-
-            elif msg_type == "up":
-                button_name = data.get("button", "left").lower()
-                button = Button.left if button_name == "left" else Button.right
-                movement.button("up", button)
-
-            elif msg_type == "scroll":
-                dx = float(data.get("dx", 0))
-                dy = float(data.get("dy", 0))
-                try:
-                    mouse.scroll(dx * SCROLL_MULTIPLIER, dy * SCROLL_MULTIPLIER)
-                except Exception:
-                    pass
-
-            elif msg_type == "zoom":
-                # macOS-style pinch: Command + scroll wheel
-                dy = float(data.get("dy", 0))
-                if abs(dy) < 1e-6:
-                    continue
-                try:
-                    if keyboard is not None and Key is not None:
-                        keyboard.press(Key.cmd)
-                        try:
-                            mouse.scroll(0, dy * SCROLL_MULTIPLIER)
-                        finally:
-                            keyboard.release(Key.cmd)
-                    else:
-                        mouse.scroll(0, dy * SCROLL_MULTIPLIER)
-                except Exception:
-                    pass
-
+            dispatch_pointer_message(data)
         except json.JSONDecodeError:
             continue
         except Exception:
@@ -592,6 +748,51 @@ def quit_frontmost():
     return keystroke("q", "{command down}", "Quit frontmost app")
 
 
+# ---------- Presentation shortcuts (Keynote / PowerPoint / Slides) ----------
+def present_next():
+    # Right arrow — next slide / next build across major apps
+    return key_code(124, success_message="Next")
+
+
+def present_prev():
+    return key_code(123, success_message="Previous")
+
+
+def present_space():
+    # Space advances builds/slides in Keynote, PowerPoint, and Google Slides
+    return key_code(49, success_message="Advance")
+
+
+def present_exit():
+    return key_code(53, success_message="Exited slideshow")
+
+
+def present_black():
+    return keystroke("b", success_message="Black screen")
+
+
+def present_white():
+    return keystroke("w", success_message="White screen")
+
+
+def present_start():
+    # Keynote & PowerPoint (Mac): ⌘⇧↩ play from beginning
+    return key_code(36, "{command down, shift down}", "Playing from start")
+
+
+def present_from_current():
+    # Keynote & PowerPoint (Mac): ⌘↩ play from current slide
+    return key_code(36, "{command down}", "Playing from current")
+
+
+def present_first_slide():
+    return key_code(115, success_message="First slide")
+
+
+def present_last_slide():
+    return key_code(119, success_message="Last slide")
+
+
 CONTROL_ACTIONS = {
     "volume_up": volume_up,
     "volume_down": volume_down,
@@ -613,6 +814,17 @@ CONTROL_ACTIONS = {
     "empty_trash": empty_trash,
     "dark_mode": toggle_dark_mode,
     "quit_front": quit_frontmost,
+    "open_accessibility": open_accessibility_settings,
+    "present_next": present_next,
+    "present_prev": present_prev,
+    "present_space": present_space,
+    "present_exit": present_exit,
+    "present_black": present_black,
+    "present_white": present_white,
+    "present_start": present_start,
+    "present_from_current": present_from_current,
+    "present_first": present_first_slide,
+    "present_last": present_last_slide,
 }
 
 
@@ -636,9 +848,172 @@ class StaticHandler(SimpleHTTPRequestHandler):
         body = json.dumps(payload).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _bytes(self, code: int, body: bytes, content_type: str):
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_exact(self, n: int) -> bytes:
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = self.rfile.read(n - len(buf))
+            if not chunk:
+                raise ConnectionError("websocket closed")
+            buf.extend(chunk)
+        return bytes(buf)
+
+    def _write_ws_frame(self, opcode: int, payload: bytes = b"") -> None:
+        header = bytearray()
+        header.append(0x80 | (opcode & 0x0F))
+        length = len(payload)
+        if length < 126:
+            header.append(length)
+        elif length < (1 << 16):
+            header.append(126)
+            header.extend(length.to_bytes(2, "big"))
+        else:
+            header.append(127)
+            header.extend(length.to_bytes(8, "big"))
+        self.wfile.write(header + payload)
+        self.wfile.flush()
+
+    def _read_ws_message(self):
+        """Read one complete data frame from a client (masked). Returns (payload, opcode) or None on close."""
+        while True:
+            b1 = self._read_exact(1)[0]
+            opcode = b1 & 0x0F
+            b2 = self._read_exact(1)[0]
+            masked = (b2 >> 7) & 1
+            length = b2 & 0x7F
+            if length == 126:
+                length = int.from_bytes(self._read_exact(2), "big")
+            elif length == 127:
+                length = int.from_bytes(self._read_exact(8), "big")
+            mask = self._read_exact(4) if masked else b"\x00\x00\x00\x00"
+            payload = bytearray(self._read_exact(length))
+            if masked:
+                for i in range(len(payload)):
+                    payload[i] ^= mask[i % 4]
+
+            if opcode == 0x8:  # close
+                try:
+                    self._write_ws_frame(0x8, bytes(payload[:2]))
+                except Exception:
+                    pass
+                return None
+            if opcode == 0x9:  # ping
+                self._write_ws_frame(0xA, bytes(payload))
+                continue
+            if opcode == 0xA:  # pong
+                continue
+            if opcode in (0x1, 0x2):  # text / binary
+                return bytes(payload), opcode
+            # ignore other opcodes
+
+    def _handle_websocket(self):
+        key = self.headers.get("Sec-WebSocket-Key")
+        if not key:
+            self.send_error(400, "Missing Sec-WebSocket-Key")
+            return
+        accept = base64.b64encode(
+            hashlib.sha1((key + WS_GUID).encode("utf-8")).digest()
+        ).decode("ascii")
+
+        # WebSocket requires HTTP/1.1; BaseHTTPRequestHandler defaults to 1.0.
+        self.protocol_version = "HTTP/1.1"
+        self.close_connection = False
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        try:
+            self.wfile.flush()
+        except Exception:
+            pass
+
+        try:
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+
+        try:
+            while True:
+                message = self._read_ws_message()
+                if message is None:
+                    break
+                payload, opcode = message
+                if opcode == 0x2:
+                    data = parse_binary_message(payload)
+                else:
+                    try:
+                        data = json.loads(payload.decode("utf-8"))
+                    except Exception:
+                        continue
+                dispatch_pointer_message(data)
+        except Exception:
+            pass
+        finally:
+            self.close_connection = True
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/ws":
+            if self.headers.get("Upgrade", "").lower() == "websocket":
+                return self._handle_websocket()
+            return self._json(
+                426,
+                {"status": "error", "error": "Upgrade required — use WebSocket"},
+            )
+
+        if path == "/api/pair":
+            base = phone_base_url()
+            return self._json(
+                200,
+                {
+                    "status": "ok",
+                    "phone_url": base + "/",
+                    "controls_url": base + "/apps.html",
+                    "setup_url": f"http://127.0.0.1:{SETUP_PORT}/setup.html",
+                    "ip": get_lan_ip(),
+                    "scheme": ACTIVE_SCHEME,
+                    "http_port": HTTP_PORT,
+                    "ws_port": WS_PORT,
+                    "ws_path": "/ws",
+                    "accessibility_trusted": is_accessibility_trusted(),
+                },
+            )
+
+        if path == "/api/qr.svg":
+            qs = parse_qs(parsed.query)
+            target = (qs.get("url") or [phone_base_url() + "/"])[0]
+            # Only allow QR for this machine's remote-mouse URLs
+            allowed_prefix = phone_base_url()
+            if not (target.startswith(allowed_prefix) or target.startswith("http://127.0.0.1") or target.startswith("https://127.0.0.1")):
+                target = allowed_prefix + "/"
+            try:
+                svg = build_qr_svg(target)
+                return self._bytes(200, svg, "image/svg+xml; charset=utf-8")
+            except Exception as e:
+                return self._json(500, {"status": "error", "error": str(e)})
+
+        if path in ("/", "/setup", "/setup/"):
+            # On the localhost setup port, land on the pairing page.
+            if self.server.server_address[0] == "127.0.0.1":
+                self.path = "/setup.html"
+            return super().do_GET()
+
+        return super().do_GET()
 
     def do_POST(self):
         if self.path != "/api/command":
@@ -773,6 +1148,31 @@ def start_http_server(ssl_context=None):
     httpd.serve_forever()
 
 
+def start_setup_server():
+    """Localhost-only HTTP UI so the Mac pairing page opens without a cert warning."""
+    server_address = ("127.0.0.1", SETUP_PORT)
+    httpd = ThreadingHTTPServer(server_address, StaticHandler)
+    print(f"Setup page: http://127.0.0.1:{SETUP_PORT}/setup.html")
+    httpd.serve_forever()
+
+
+def open_setup_page():
+    if os.environ.get("REMOTE_MOUSE_NO_BROWSER", "").strip() in {"1", "true", "yes"}:
+        return
+    url = f"http://127.0.0.1:{SETUP_PORT}/setup.html"
+    # Wait briefly so the setup server accepts connections.
+    for _ in range(30):
+        try:
+            with socket.create_connection(("127.0.0.1", SETUP_PORT), timeout=0.2):
+                break
+        except OSError:
+            time.sleep(0.1)
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+
 async def start_ws_server(ssl_context=None):
     scheme = "wss" if ssl_context is not None else "ws"
     print(f"WebSocket server listening on {scheme}://0.0.0.0:{WS_PORT}")
@@ -796,6 +1196,7 @@ async def async_main(ssl_context=None):
 
 
 def main():
+    global ACTIVE_SCHEME
     import ssl
 
     ip = get_lan_ip()
@@ -805,26 +1206,39 @@ def main():
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_context.load_cert_chain(certfile=str(cert_file), keyfile=str(key_file))
 
-    scheme = "https" if ssl_context else "http"
+    ACTIVE_SCHEME = "https" if ssl_context else "http"
+    phone_url = phone_base_url()
+
     print("Remote Mouse Server (Optimized)")
     print("===============================")
-    print(f"Open on your phone: {scheme}://{ip}:{HTTP_PORT}")
-    print(f"Controls page:      {scheme}://{ip}:{HTTP_PORT}/apps.html")
+    print(f"Mac setup (QR):     http://127.0.0.1:{SETUP_PORT}/setup.html")
+    print(f"Open on your phone: {phone_url}")
+    print(f"Controls page:      {phone_url}/apps.html")
     if ssl_context:
-        print("Gyro mode needs HTTPS — if the browser warns about the certificate,")
+        print("Gyro mode needs HTTPS — if the phone warns about the certificate,")
         print("tap Advanced → Proceed (or install/trust ~/.remote-mouse/cert.pem).")
     else:
         print("TLS cert not available (openssl missing) — Gyro may be blocked on iPhone.")
         print("Install openssl or open the page via a trusted HTTPS tunnel.")
-    print("If the cursor does not move, grant Accessibility permissions:")
-    print(
-        "System Settings → Privacy & Security → Accessibility → enable Terminal/Python"
-    )
+    trusted = is_accessibility_trusted()
+    if trusted is False:
+        print("Accessibility is OFF — open the setup page and click “Open Accessibility Settings”.")
+    elif trusted is True:
+        print("Accessibility permission: granted")
+    else:
+        print("If the cursor does not move, grant Accessibility permissions:")
+        print(
+            "System Settings → Privacy & Security → Accessibility → enable Terminal/Python"
+        )
 
     http_thread = threading.Thread(
         target=start_http_server, kwargs={"ssl_context": ssl_context}, daemon=True
     )
     http_thread.start()
+
+    setup_thread = threading.Thread(target=start_setup_server, daemon=True)
+    setup_thread.start()
+    threading.Thread(target=open_setup_page, daemon=True).start()
 
     try:
         asyncio.run(async_main(ssl_context))

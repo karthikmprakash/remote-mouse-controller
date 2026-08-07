@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Remote Mouse — Connect your phone</title>
+  <link rel="stylesheet" href="/styles.css?v=10" />
+  <link rel="stylesheet" href="/setup.css?v=10" />
+</head>
+<body class="is-setup">
+  <main class="setup-shell">
+    <header class="setup-hero">
+      <div class="setup-brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+            <rect x="6" y="3" width="12" height="18" rx="6"/>
+            <line x1="12" y1="3" x2="12" y2="11"/>
+          </svg>
+        </div>
+        <div>
+          <h1>Remote Mouse</h1>
+          <p class="setup-tagline">Connect your phone in under a minute</p>
+        </div>
+      </div>
+      <div id="access-pill" class="access-pill is-unknown" aria-live="polite">
+        <span class="access-dot" aria-hidden="true"></span>
+        <span id="access-text">Checking Mac permissions…</span>
+      </div>
+    </header>
+
+    <section class="setup-stage" aria-label="Phone pairing">
+      <div class="setup-qr-card">
+        <div id="qr-frame" class="qr-frame" aria-label="QR code">
+          <div class="qr-skeleton" id="qr-skeleton">Preparing QR…</div>
+        </div>
+        <p class="setup-qr-caption">Scan with your phone camera</p>
+        <p class="setup-url" id="phone-url">Loading address…</p>
+        <div class="setup-actions">
+          <button id="copy-url" class="setup-btn" type="button">Copy link</button>
+          <a id="open-phone" class="setup-btn setup-btn--ghost" href="#" target="_blank" rel="noopener">Open on this Mac</a>
+        </div>
+      </div>
+
+      <ol class="setup-steps">
+        <li>
+          <span class="step-num">1</span>
+          <div>
+            <h2>Same Wi‑Fi</h2>
+            <p>Phone and Mac must be on the same network (not guest / VPN).</p>
+          </div>
+        </li>
+        <li>
+          <span class="step-num">2</span>
+          <div>
+            <h2>Scan the QR</h2>
+            <p>Open the link. If Safari warns about the certificate, tap <strong>Advanced → Proceed</strong>.</p>
+          </div>
+        </li>
+        <li>
+          <span class="step-num">3</span>
+          <div>
+            <h2>Add to Home Screen</h2>
+            <p><strong>iPhone:</strong> Share → Add to Home Screen.<br /><strong>Android:</strong> menu → Install app / Add to Home screen.</p>
+          </div>
+        </li>
+        <li>
+          <span class="step-num">4</span>
+          <div>
+            <h2>Allow mouse control</h2>
+            <p>macOS needs Accessibility permission so the cursor can move.</p>
+            <button id="open-access" class="setup-btn setup-btn--accent" type="button">Open Accessibility Settings</button>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <p class="setup-foot" id="setup-foot">Keep this window open while you use Remote Mouse.</p>
+  </main>
+
+  <div class="toast-host" aria-live="polite"></div>
+  <script src="/setup.js?v=10"></script>
+</body>
+</html>
